@@ -1,0 +1,11 @@
+{
+    "demo_KRW-BTC": [
+        {
+            "buy_price": 160536230.0,
+            "quantity": 0.07783443498196453,
+            "target_sell_price": 161348032.5,
+            "actual_buy_price": 160517000.0,
+            "highest_price": 160517000.0
+        }
+    ]
+}
