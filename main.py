@@ -1376,7 +1376,7 @@ def start_dashboard():
 
     ttk.Label(settings_frame, text="가격 범위 기준:").grid(row=4, column=0, sticky='w', padx=3, pady=1)
     period_combo = ttk.Combobox(settings_frame, values=["1시간", "4시간", "1일", "7일"], state="readonly")
-    period_combo.set("1일")
+    period_combo.set("4시간")
     period_combo.grid(row=4, column=1, sticky='ew', padx=3)
 
     def update_grid_count_on_period_change(event):
