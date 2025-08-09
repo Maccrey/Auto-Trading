@@ -418,13 +418,13 @@ def calculate_optimal_grid_count(high_price, low_price):
     price_range_percent = ((high_price - low_price) / low_price) * 100
     
     if price_range_percent < 5:
-        return 20
-    elif price_range_percent < 10:
-        return 15
-    elif price_range_percent < 15:
-        return 10
-    else:
         return 8
+    elif price_range_percent < 10:
+        return 6
+    elif price_range_percent < 15:
+        return 5
+    else:
+        return 4
 
 # 차트 데이터 가져오기
 def get_chart_data(ticker, period):
@@ -1625,12 +1625,12 @@ def start_dashboard():
             control_button.config(text="거래 시작")
 
     control_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading)
-    control_button.grid(row=6, column=0, columnspan=2, sticky='ew', pady=8, padx=3)
+    control_button.grid(row=7, column=0, columnspan=2, sticky='ew', pady=8, padx=3)
 
     # 설명 라벨 추가
     info_text = "그리드 투자: 설정 기간의 최고가/최저가 범위를 그리드로 분할하여 자동 매수/매도 (v2.0 - 급락대응/손절/트레일링스탑)"
     info_label = ttk.Label(settings_frame, text=info_text, font=('Helvetica', 8), foreground='gray')
-    info_label.grid(row=7, column=0, columnspan=2, sticky='ew', padx=3, pady=2)
+    info_label.grid(row=8, column=0, columnspan=2, sticky='ew', padx=3, pady=2)
     
     # 차트 업데이트 버튼
     def refresh_charts():
