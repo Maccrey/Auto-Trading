@@ -15,6 +15,28 @@ import numpy as np
 import os
 from pathlib import Path
 import xlsxwriter
+import pyttsx3
+
+# === TTS 엔진 초기화 ===
+try:
+    tts_engine = pyttsx3.init()
+except Exception as e:
+    print(f"TTS 엔진 초기화 오류: {e}")
+    tts_engine = None
+
+def speak(text):
+    """TTS로 텍스트를 읽어주는 함수 (블로킹 방식)"""
+    if tts_engine:
+        try:
+            tts_engine.say(text)
+            tts_engine.runAndWait()
+        except Exception as e:
+            print(f"TTS 실행 오류: {e}")
+
+def speak_async(text):
+    """별도 스레드에서 TTS 실행 (논블로킹)"""
+    threading.Thread(target=speak, args=(text,), daemon=True).start()
+
 
 # === 설정 파일 관리 ===
 config_file = "config.json"
@@ -577,6 +599,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         if panic_mode:
                             log_msg += " [급락대응]"
                         log_trade(ticker, "데모 매수", log_msg, lambda log: update_gui('log', log))
+                        
+                        # TTS 음성 안내
+                        tts_msg = f"데모 모드, 그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
+                        speak_async(tts_msg)
+
                         update_gui('refresh_chart')
             
             # 데모 모드 매도 로직 (트레일링 스탑 포함)
@@ -619,6 +646,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                     log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
                     log_trade(ticker, "데모 매도", log_msg, lambda log: update_gui('log', log))
+
+                    # TTS 음성 안내
+                    tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')} {price:,.0f}원에 매도되었습니다."
+                    speak_async(tts_msg)
+
                     update_gui('refresh_chart')
             
             # 긴급 청산 체크
@@ -691,6 +723,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     if panic_mode:
                                         log_msg += " [급락대응]"
                                     log_trade(ticker, "실제 매수", log_msg, lambda log: update_gui('log', log))
+
+                                    # TTS 음성 안내
+                                    tts_msg = f"그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
+                                    speak_async(tts_msg)
+
                                     update_gui('refresh_chart')
                         else:
                             log_trade(ticker, '오류', '매수 주문 실패', lambda log: update_gui('log', log))
@@ -721,6 +758,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         real_positions.remove(position)
                         log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개)"
                         log_trade(ticker, "실제 매도", log_msg, lambda log: update_gui('log', log))
+
+                        # TTS 음성 안내
+                        tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}, {price:,.0f}원에 매도되었습니다."
+                        speak_async(tts_msg)
+
                         update_gui('refresh_chart')
                     else:
                         log_trade(ticker, '오류', '매도 주문 실패', lambda log: update_gui('log', log))
