@@ -17,28 +17,51 @@ from pathlib import Path
 import xlsxwriter
 import pyttsx3
 
-# === TTS 엔진 초기화 ===
+# TTS 엔진 초기화
 try:
     tts_engine = pyttsx3.init()
+    tts_queue = Queue()
+    tts_lock = threading.Lock()
+    tts_worker_thread = None
 except Exception as e:
     print(f"TTS 엔진 초기화 오류: {e}")
     tts_engine = None
 
-def speak(text):
-    """TTS로 텍스트를 읽어주는 함수 (블로킹 방식)"""
-    if tts_engine:
+def tts_worker():
+    """TTS 큐의 메시지를 순차적으로 처리하는 작업자"""
+    while True:
         try:
-            tts_engine.say(text)
-            tts_engine.runAndWait()
+            text = tts_queue.get()
+            if text is None: # 종료 신호
+                break
+            with tts_lock:
+                if tts_engine:
+                    tts_engine.say(text)
+                    tts_engine.runAndWait()
+            tts_queue.task_done()
         except Exception as e:
-            print(f"TTS 실행 오류: {e}")
+            print(f"TTS 작업자 오류: {e}")
 
 def speak_async(text):
-    """별도 스레드에서 TTS 실행 (논블로킹)"""
-    threading.Thread(target=speak, args=(text,), daemon=True).start()
+    """TTS 큐에 메시지를 추가 (논블로킹)"""
+    if tts_engine and config.get('tts_enabled', True):
+        tts_queue.put(text)
+
+def start_tts_worker():
+    """TTS 작업자 스레드 시작"""
+    global tts_worker_thread
+    if tts_engine and (tts_worker_thread is None or not tts_worker_thread.is_alive()):
+        tts_worker_thread = threading.Thread(target=tts_worker, daemon=True)
+        tts_worker_thread.start()
+
+def stop_tts_worker():
+    """TTS 작업자 스레드 종료"""
+    if tts_worker_thread and tts_worker_thread.is_alive():
+        tts_queue.put(None) # 종료 신호
+        tts_worker_thread.join(timeout=2)
 
 
-# === 설정 파일 관리 ===
+# 설정 파일 관리
 config_file = "config.json"
 profit_file = "profits.json"
 log_file = "trade_logs.json"
@@ -127,7 +150,7 @@ def initialize_upbit():
             return False
     return False
 
-# === 카카오톡 알림 API ===
+# 카카오톡 알림 API
 def send_kakao_message(message):
     """카카오톡 메시지 전송"""
     if not config["kakao_token"]:
@@ -148,7 +171,7 @@ def send_kakao_message(message):
     except requests.exceptions.RequestException as e:
         print(f"카카오톡 전송 중 오류 발생: {e}")
 
-# === JSON 파일 관리 ===
+# JSON 파일 관리
 def initialize_files():
     """필요한 JSON 파일들 초기화"""
     for file in [profit_file, log_file, config_file]:
@@ -271,7 +294,7 @@ def log_trade(ticker, action, price, log_callback=None):
         full_log_entry['ticker'] = ticker
         log_callback(full_log_entry)
 
-# === 급락 감지 및 대응 전략 ===
+# 급락 감지 및 대응 전략
 def detect_panic_selling(ticker, current_price, previous_prices, threshold_percent=-5.0):
     """급락 상황 감지"""
     if len(previous_prices) < 10:  # 최소 10개 데이터 필요
@@ -294,7 +317,7 @@ def calculate_dynamic_grid(ticker, base_low, base_high, current_price, panic_mod
     
     return base_low, base_high
 
-# === 개선된 주문 실행 함수 ===
+# 개선된 주문 실행 함수
 def execute_buy_order(ticker, amount, current_price, use_limit=True):
     """개선된 매수 주문 실행"""
     global upbit
@@ -339,7 +362,7 @@ def execute_sell_order(ticker, quantity, current_price, use_limit=True):
         print(f"매도 주문 실행 오류: {e}")
         return None
 
-# === 상태 평가 개선 ===
+# 상태 평가 개선
 def evaluate_status(profit_percent, is_trading=False, panic_mode=False):
     """상태 평가 (급락 모드 포함)"""
     if not is_trading:
@@ -357,7 +380,7 @@ def evaluate_status(profit_percent, is_trading=False, panic_mode=False):
     else:
         return "위험", "Red.TLabel"
 
-# === 가격 범위 계산 함수 ===
+# 가격 범위 계산 함수
 def calculate_price_range(ticker, period):
     """선택한 기간에 따라 상한가/하한가를 계산"""
     try:
@@ -403,7 +426,7 @@ def calculate_optimal_grid_count(high_price, low_price):
     else:
         return 8
 
-# === 차트 데이터 가져오기 ===
+# 차트 데이터 가져오기
 def get_chart_data(ticker, period):
     """차트용 데이터 가져오기"""
     try:
@@ -423,7 +446,7 @@ def get_chart_data(ticker, period):
         print(f"차트 데이터 가져오기 오류: {e}")
         return None
 
-# === 백테스트 모듈 ===
+# 백테스트 모듈
 def run_backtest(ticker, start_date, end_date, grid_count, total_investment, period="1일"):
     """백테스트 실행"""
     try:
@@ -479,7 +502,7 @@ def run_backtest(ticker, start_date, end_date, grid_count, total_investment, per
         print(f"백테스트 오류: {e}")
         return None
 
-# === 개선된 그리드 트레이딩 로직 ===
+# 개선된 그리드 트레이딩 로직
 def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent, period, stop_event, gui_queue):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
     start_time = datetime.now()
@@ -637,7 +660,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         
                         # TTS 음성 안내
                         if config.get('tts_enabled', True):
-                            tts_msg = f"데모 모드, 그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
+                            tts_msg = f"데모 모드, 그리드 {i+1}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매수되었습니다."
                             speak_async(tts_msg)
 
                         update_gui('refresh_chart')
@@ -686,7 +709,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                     # TTS 음성 안내
                     if config.get('tts_enabled', True):
-                        tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')} {price:,.0f}원에 매도되었습니다."
+                        tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다."
                         speak_async(tts_msg)
 
                     update_gui('refresh_chart')
@@ -766,7 +789,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                                     # TTS 음성 안내
                                     if config.get('tts_enabled', True):
-                                        tts_msg = f"그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
+                                        tts_msg = f"그리드 {i+1}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매수되었습니다."
                                         speak_async(tts_msg)
 
                                     update_gui('refresh_chart')
@@ -803,7 +826,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                         # TTS 음성 안내
                         if config.get('tts_enabled', True):
-                            tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}, {price:,.0f}원에 매도되었습니다."
+                            tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다."
                             speak_async(tts_msg)
 
                         update_gui('refresh_chart')
@@ -846,15 +869,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             save_trading_state(ticker, [], demo_mode) # 성공 시 상태 초기화
             
             # 상세 알림 메시지 생성
-            summary_msg = f"""
-{ticker} 목표 달성 완료!
-목표 수익률: {target_profit_percent}%
-실제 수익률: {profit_percent:.2f}%
-운영 시간: {running_time_str}
-총 거래 횟수: {len([log for log in previous_prices if 'trade' in str(log)])}
-실현 수익: {total_realized_profit:,.0f}원
-"""
-            send_kakao_message(summary_msg.strip())
+            summary_msg = (
+                f"{ticker} 목표 달성 완료!\n"
+                f"시작 시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"종료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"목표 수익률: {target_profit_percent}%\n"
+                f"실제 수익률: {profit_percent:.2f}%\n"
+                f"운영 시간: {running_time_str}\n"
+                f"총 거래 횟수: {len([log for log in previous_prices if 'trade' in str(log)])}\n"
+                f"실현 수익: {total_realized_profit:,.0f}원"
+            )
+            send_kakao_message(summary_msg)
             break
         
         prev_price = price
@@ -864,7 +889,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         log_trade(ticker, '중지', '사용자 요청', lambda log: update_gui('log', log))
         update_gui('status', "상태: 중지됨", "Orange.TLabel", False, False)
 
-# === 설정 창 ===
+# 설정 창
 def open_settings_window(root, config, callback):
     """설정 창 열기"""
     settings_window = tk.Toplevel(root)
@@ -999,7 +1024,7 @@ def open_settings_window(root, config, callback):
     ttk.Button(button_frame, text="저장", command=save_settings).pack(side='right', padx=(10, 0))
     ttk.Button(button_frame, text="취소", command=settings_window.destroy).pack(side='right')
 
-# === 백테스트 창 ===
+# 백테스트 창
 def open_backtest_window(root):
     """백테스트 창 열기"""
     bt_window = tk.Toplevel(root)
@@ -1059,9 +1084,9 @@ def open_backtest_window(root):
             if result:
                 result_text.delete(1.0, tk.END)
                 result_text.insert(tk.END, f"=== 백테스트 결과 ({ticker}) ===\n\n")
-                result_text.insert(tk.END, f"총 수익률: {result['total_return']:.2f}%\n")
-                result_text.insert(tk.END, f"최종 자산: {result['final_value']:,.0f}원\n")
-                result_text.insert(tk.END, f"총 거래 횟수: {result['num_trades']}회\n\n")
+                result_text.insert(tk.END, f"총 수익률: {result['total_return']:.2f}%")
+                result_text.insert(tk.END, f"\n최종 자산: {result['final_value']:,.0f}원")
+                result_text.insert(tk.END, f"\n총 거래 횟수: {result['num_trades']}회\n\n")
                 result_text.insert(tk.END, "최근 거래 내역:\n")
                 for trade in result['trades']:
                     result_text.insert(tk.END, f"{trade['date']}: {trade['type']} {trade['price']:,.0f}원\n")
@@ -1076,7 +1101,7 @@ def open_backtest_window(root):
     ttk.Button(bt_window, text="백테스트 실행", command=run_bt).pack(pady=10)
 
 
-# === GUI 대시보드 ===
+# GUI 대시보드
 def start_dashboard():
     """메인 대시보드 시작"""
     # 한글 폰트 설정
@@ -1092,9 +1117,21 @@ def start_dashboard():
     chart_data = {}
     global config, upbit
 
+    start_tts_worker()
+
     root = tk.Tk()
     root.title("그리드 투자 자동매매 대시보드 v2.0")
     root.geometry("1400x900")
+
+    def on_closing():
+        if messagebox.askokcancel("종료", "정말로 종료하시겠습니까?"):
+            if active_trades:
+                for ticker, stop_event in active_trades.items():
+                    stop_event.set()
+            stop_tts_worker()
+            root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
 
     def update_config(new_config):
         """설정 업데이트 콜백"""
