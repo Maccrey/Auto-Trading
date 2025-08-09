@@ -42,6 +42,8 @@ def speak_async(text):
 config_file = "config.json"
 profit_file = "profits.json"
 log_file = "trade_logs.json"
+state_file = "trading_state.json"
+state_lock = threading.Lock() # 상태 파일 접근을 위한 락
 
 default_config = {
     "upbit_access": "",
@@ -57,6 +59,33 @@ default_config = {
     "emergency_exit_enabled": True,  # 긴급 청산 활성화
     "auto_grid_count": True # 그리드 개수 자동 계산
 }
+
+def save_trading_state(ticker, positions, demo_mode):
+    """현재 포지션 상태를 파일에 저장"""
+    with state_lock:
+        try:
+            with open(state_file, 'r', encoding='utf-8') as f:
+                all_states = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            all_states = {}
+        
+        state_key = f"demo_{ticker}" if demo_mode else f"real_{ticker}"
+        all_states[state_key] = positions
+        
+        with open(state_file, 'w', encoding='utf-8') as f:
+            json.dump(all_states, f, indent=4, ensure_ascii=False)
+
+def load_trading_state(ticker, demo_mode):
+    """파일에서 포지션 상태를 로드"""
+    with state_lock:
+        try:
+            with open(state_file, 'r', encoding='utf-8') as f:
+                all_states = json.load(f)
+            state_key = f"demo_{ticker}" if demo_mode else f"real_{ticker}"
+            return all_states.get(state_key, [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
 
 def load_config():
     """설정 파일 로드"""
@@ -493,7 +522,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     if demo_mode:
         start_balance = total_investment
         demo_balance = total_investment
-        demo_positions = []
+        demo_positions = load_trading_state(ticker, True)
+        if demo_positions:
+            log_trade(ticker, '정보', f'{len(demo_positions)}개의 포지션을 복원했습니다.', lambda log: update_gui('log', log))
         total_invested = 0
     else:
         if upbit is None:
@@ -506,7 +537,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             log_trade(ticker, '오류', '잔액 조회 실패', lambda log: update_gui('log', log))
             update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
             return
-        real_positions = []
+        real_positions = load_trading_state(ticker, False)
+        if real_positions:
+            log_trade(ticker, '정보', f'{len(real_positions)}개의 포지션을 복원했습니다.', lambda log: update_gui('log', log))
         total_invested = 0
     
     prev_price = current_price
@@ -594,6 +627,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             'actual_buy_price': price,
                             'highest_price': price  # 트레일링 스탑용
                         })
+                        save_trading_state(ticker, demo_positions, True)
                         
                         log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({quantity:.6f}개) → 목표: {target_sell_price:,.0f}원"
                         if panic_mode:
@@ -639,6 +673,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     
                     demo_balance += net_sell_amount
                     demo_positions.remove(position)
+                    save_trading_state(ticker, demo_positions, True)
                     
                     buy_cost = position['quantity'] * position['actual_buy_price']
                     net_profit = net_sell_amount - buy_cost
@@ -667,6 +702,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     net_sell_amount = sell_amount - sell_fee
                     demo_balance += net_sell_amount
                     demo_positions.remove(position)
+                save_trading_state(ticker, demo_positions, True) # 상태 저장
                 
                 log_trade(ticker, '긴급청산', f'손실 임계점 도달: {profit_percent:.2f}%', lambda log: update_gui('log', log))
                 send_kakao_message(f"{ticker} 긴급 청산 실행! 손실률: {profit_percent:.2f}%")
@@ -717,6 +753,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                         'fee': paid_fee,
                                         'highest_price': price
                                     })
+                                    save_trading_state(ticker, real_positions, False)
                                     total_invested += actual_buy_amount
                                     
                                     log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({executed_volume:.6f}개) → 목표: {target_sell_price:,.0f}원"
@@ -756,6 +793,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     res = execute_sell_order(ticker, position['quantity'], price, config.get("use_limit_orders", True))
                     if res and 'uuid' in res:
                         real_positions.remove(position)
+                        save_trading_state(ticker, real_positions, False)
                         log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개)"
                         log_trade(ticker, "실제 매도", log_msg, lambda log: update_gui('log', log))
 
@@ -783,6 +821,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     # 모든 코인 매도
                     if coin_balance > 0:
                         upbit.sell_market_order(ticker, coin_balance)
+                        real_positions.clear() # 모든 포지션 제거
+                        save_trading_state(ticker, real_positions, False) # 상태 저장
                         log_trade(ticker, '긴급청산', f'손실 임계점 도달: {profit_percent:.2f}%', lambda log: update_gui('log', log))
                         send_kakao_message(f"{ticker} 긴급 청산 실행! 손실률: {profit_percent:.2f}%")
                         break
@@ -798,6 +838,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         if profit_percent >= target_profit_percent:
             log_trade(ticker, '성공', '목표 수익 달성', lambda log: update_gui('log', log))
             update_gui('status', "상태: 목표 달성!", "Blue.TLabel", True, False)
+            save_trading_state(ticker, [], demo_mode) # 성공 시 상태 초기화
             
             # 상세 알림 메시지 생성
             summary_msg = f"""
