@@ -86,6 +86,7 @@ default_config = {
     "emergency_exit_enabled": True,  # 긴급 청산 활성화
     "auto_grid_count": True, # 그리드 개수 자동 계산
     "tts_enabled": True, # TTS 음성 안내 사용
+    "kakao_enabled": True, # 카카오톡 알림 사용
     "total_investment": "100000",
     "grid_count": "10",
     "period": "4시간",
@@ -346,6 +347,9 @@ def execute_buy_order(ticker, amount, current_price, use_limit=True):
         else:
             # 시장가 주문
             return upbit.buy_market_order(ticker, amount)
+    except requests.exceptions.RequestException as e:
+        print(f"매수 주문 네트워크 오류: {e}")
+        return None
     except Exception as e:
         print(f"매수 주문 실행 오류: {e}")
         return None
@@ -367,6 +371,9 @@ def execute_sell_order(ticker, quantity, current_price, use_limit=True):
         else:
             # 시장가 주문
             return upbit.sell_market_order(ticker, quantity)
+    except requests.exceptions.RequestException as e:
+        print(f"매도 주문 네트워크 오류: {e}")
+        return None
     except Exception as e:
         print(f"매도 주문 실행 오류: {e}")
         return None
@@ -683,13 +690,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         try:
             price = pyupbit.get_current_price(ticker)
             if price is None:
-                # API 조회 실패 (네트워크 문제 등)
-                log_trade(ticker, '오류', '현재가 조회 실패, 10초 후 재시도', lambda log: update_gui('log', log))
-                time.sleep(10)
+                time.sleep(1) # None을 반환하는 경우 잠시 후 재시도
                 continue
         except requests.exceptions.RequestException as e:
-            log_trade(ticker, '오류', f'API 요청 오류: {e}, 10초 후 재시도', lambda log: update_gui('log', log))
-            time.sleep(10)
+            log_trade(ticker, '오류', f'네트워크 오류 발생: {e}', lambda log: update_gui('log', log))
+            time.sleep(10) # 네트워크 불안정시 더 길게 대기
             continue
         
         # 운영 시간 계산
@@ -760,6 +765,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             tts_msg = f"데모 모드, 그리드 {i+1}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매수되었습니다."
                             speak_async(tts_msg)
 
+                        # 카카오톡 알림
+                        if config.get('kakao_enabled', True):
+                            kakao_msg = f"[데모 매수] {ticker.replace('KRW-','')} {price:,.0f}원 ({quantity:.6f}개) 매수"
+                            send_kakao_message(kakao_msg)
+
                         update_gui('refresh_chart')
             
             # 데모 모드 매도 로직 (트레일링 스탑 포함)
@@ -808,6 +818,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     if config.get('tts_enabled', True):
                         tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다."
                         speak_async(tts_msg)
+
+                    # 카카오톡 알림
+                    if config.get('kakao_enabled', True):
+                        kakao_msg = f"[데모 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})"
+                        send_kakao_message(kakao_msg)
 
                     update_gui('refresh_chart')
             
@@ -889,6 +904,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                         tts_msg = f"그리드 {i+1}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매수되었습니다."
                                         speak_async(tts_msg)
 
+                                    # 카카오톡 알림
+                                    if config.get('kakao_enabled', True):
+                                        kakao_msg = f"[실제 매수] {ticker.replace('KRW-','')} {price:,.0f}원 ({executed_volume:.6f}개) 매수"
+                                        send_kakao_message(kakao_msg)
+
                                     update_gui('refresh_chart')
                         else:
                             log_trade(ticker, '오류', '매수 주문 실패', lambda log: update_gui('log', log))
@@ -925,6 +945,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         if config.get('tts_enabled', True):
                             tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다."
                             speak_async(tts_msg)
+
+                        # 카카오톡 알림
+                        if config.get('kakao_enabled', True):
+                            kakao_msg = f"[실제 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 매도 ({sell_reason})"
+                            send_kakao_message(kakao_msg)
 
                         update_gui('refresh_chart')
                     else:
@@ -1075,6 +1100,10 @@ def open_settings_window(root, config, callback):
     vars_dict['tts_enabled'] = tk.BooleanVar(value=config.get('tts_enabled', True))
     tts_check = ttk.Checkbutton(notification_frame, text="TTS 음성 안내 사용", variable=vars_dict['tts_enabled'])
     tts_check.pack(anchor='w', pady=5)
+
+    vars_dict['kakao_enabled'] = tk.BooleanVar(value=config.get('kakao_enabled', True))
+    kakao_enabled_check = ttk.Checkbutton(notification_frame, text="카카오톡 알림 사용", variable=vars_dict['kakao_enabled'])
+    kakao_enabled_check.pack(anchor='w', pady=5)
 
     # 리스크 관리 탭
     risk_frame = ttk.Frame(notebook)
