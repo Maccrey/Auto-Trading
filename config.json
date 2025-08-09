@@ -1,7 +1,8 @@
 {
     "upbit_access": "Z0kwVIfEvC3cVwFcKxA9pV7LaCjPsnQidZxo3xU5\n",
     "upbit_secret": "ld0LZe52W01xMCK9EIPTUngmtSUOdU9KRnd4FKGN",
-    "kakao_token": "",
+    "kakao_token": "BCEwb16Be22x9uqRiwpBtWIfRIRMNVRrAAAAAQoNIJsAAAGYjj4TmsLen3w93lOl",
+    "tts_enabled": true,
     "panic_threshold": -5.0,
     "stop_loss_threshold": -10.0,
     "trailing_stop": true,

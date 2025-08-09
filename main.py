@@ -85,7 +85,12 @@ default_config = {
     "max_position_size": 0.3,  # 최대 포지션 크기 (총 자산 대비)
     "emergency_exit_enabled": True,  # 긴급 청산 활성화
     "auto_grid_count": True, # 그리드 개수 자동 계산
-    "tts_enabled": True # TTS 음성 안내 사용
+    "tts_enabled": True, # TTS 음성 안내 사용
+    "total_investment": "100000",
+    "grid_count": "10",
+    "period": "4시간",
+    "target_profit_percent": "10",
+    "demo_mode": 1
 }
 
 def save_trading_state(ticker, positions, demo_mode):
@@ -252,7 +257,7 @@ def update_profit(ticker, profit):
         try:
             with open(profit_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             data = {}
         
         if ticker not in data:
@@ -280,7 +285,7 @@ def log_trade(ticker, action, price, log_callback=None):
         try:
             with open(log_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             data = {}
         
         if ticker not in data:
@@ -675,8 +680,15 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             last_update_day = now.day
 
-        price = pyupbit.get_current_price(ticker)
-        if price is None:
+        try:
+            price = pyupbit.get_current_price(ticker)
+            if price is None:
+                # API 조회 실패 (네트워크 문제 등)
+                log_trade(ticker, '오류', '현재가 조회 실패, 10초 후 재시도', lambda log: update_gui('log', log))
+                time.sleep(10)
+                continue
+        except requests.exceptions.RequestException as e:
+            log_trade(ticker, '오류', f'API 요청 오류: {e}, 10초 후 재시도', lambda log: update_gui('log', log))
             time.sleep(10)
             continue
         
@@ -993,15 +1005,47 @@ def open_settings_window(root, config, callback):
     api_frame = ttk.Frame(notebook)
     notebook.add(api_frame, text="API 설정")
     
+    # --- Access Key ---
     ttk.Label(api_frame, text="업비트 Access Key:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=(10, 5))
     vars_dict['upbit_access'] = tk.StringVar(value=config.get('upbit_access', ''))
-    access_entry = ttk.Entry(api_frame, textvariable=vars_dict['upbit_access'], show='*', width=60)
-    access_entry.pack(fill='x', pady=(0, 10))
     
+    access_frame = ttk.Frame(api_frame)
+    access_frame.pack(fill='x', pady=(0, 10))
+
+    access_entry = ttk.Entry(access_frame, textvariable=vars_dict['upbit_access'], show='*')
+    access_entry.pack(side='left', fill='x', expand=True)
+
+    def paste_into_access_entry():
+        try:
+            clipboard_text = root.clipboard_get()
+            access_entry.delete(0, tk.END)
+            access_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("클립보드 오류", "클립보드가 비어있거나 텍스트가 아닙니다.")
+
+    access_paste_button = ttk.Button(access_frame, text="붙여넣기", command=paste_into_access_entry)
+    access_paste_button.pack(side='right', padx=(5, 0))
+
+    # --- Secret Key ---
     ttk.Label(api_frame, text="업비트 Secret Key:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=5)
     vars_dict['upbit_secret'] = tk.StringVar(value=config.get('upbit_secret', ''))
-    secret_entry = ttk.Entry(api_frame, textvariable=vars_dict['upbit_secret'], show='*', width=60)
-    secret_entry.pack(fill='x', pady=(0, 10))
+
+    secret_frame = ttk.Frame(api_frame)
+    secret_frame.pack(fill='x', pady=(0, 10))
+    
+    secret_entry = ttk.Entry(secret_frame, textvariable=vars_dict['upbit_secret'], show='*')
+    secret_entry.pack(side='left', fill='x', expand=True)
+
+    def paste_into_secret_entry():
+        try:
+            clipboard_text = root.clipboard_get()
+            secret_entry.delete(0, tk.END)
+            secret_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("클립보드 오류", "클립보드가 비어있거나 텍스트가 아닙니다.")
+
+    secret_paste_button = ttk.Button(secret_frame, text="붙여넣기", command=paste_into_secret_entry)
+    secret_paste_button.pack(side='right', padx=(5, 0))
     
     # 알림 설정 탭
     notification_frame = ttk.Frame(notebook)
@@ -1009,8 +1053,24 @@ def open_settings_window(root, config, callback):
 
     ttk.Label(notification_frame, text="카카오톡 액세스 토큰:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=(10, 5))
     vars_dict['kakao_token'] = tk.StringVar(value=config.get('kakao_token', ''))
-    kakao_entry = ttk.Entry(notification_frame, textvariable=vars_dict['kakao_token'], show='*', width=60)
-    kakao_entry.pack(fill='x', pady=(0, 10))
+    
+    # 프레임으로 감싸서 입력창과 버튼을 나란히 배치
+    kakao_frame = ttk.Frame(notification_frame)
+    kakao_frame.pack(fill='x', pady=(0, 10))
+
+    def paste_from_clipboard():
+        try:
+            clipboard_text = root.clipboard_get()
+            kakao_entry.delete(0, tk.END)
+            kakao_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("클립보드 오류", "클립보드가 비어있거나 텍스트가 아닙니다.")
+
+    paste_button = ttk.Button(kakao_frame, text="붙여넣기", command=paste_from_clipboard)
+    paste_button.pack(side='right', padx=(5, 0))
+
+    kakao_entry = ttk.Entry(kakao_frame, textvariable=vars_dict['kakao_token'], show='*')
+    kakao_entry.pack(side='left', fill='x', expand=True)
 
     vars_dict['tts_enabled'] = tk.BooleanVar(value=config.get('tts_enabled', True))
     tts_check = ttk.Checkbutton(notification_frame, text="TTS 음성 안내 사용", variable=vars_dict['tts_enabled'])
@@ -1095,11 +1155,11 @@ def open_settings_window(root, config, callback):
             # 업비트 API 테스트
             if vars_dict['upbit_access'].get() and vars_dict['upbit_secret'].get():
                 test_upbit = pyupbit.Upbit(vars_dict['upbit_access'].get(), vars_dict['upbit_secret'].get())
-                balance = test_upbit.get_balances()
-                if balance:
-                    messagebox.showinfo("성공", "업비트 API 연결 성공!")
+                balance = test_upbit.get_balance("KRW") # KRW 잔고만 조회
+                if balance is not None: # 0원일 수도 있으므로 None 체크
+                    messagebox.showinfo("성공", f"업비트 API 연결 성공!\nKRW 잔액: {balance:,.0f}원")
                 else:
-                    messagebox.showwarning("경고", "업비트 API 연결 실패")
+                    messagebox.showwarning("경고", "업비트 API 연결에 실패했습니다. 키가 유효한지 확인해주세요.")
             else:
                 messagebox.showwarning("경고", "업비트 API 키를 입력해주세요.")
         except Exception as e:
@@ -1362,12 +1422,12 @@ def start_dashboard():
 
     ttk.Label(settings_frame, text="총 투자 금액 (KRW):").grid(row=1, column=0, sticky='w', padx=3, pady=1)
     amount_entry = ttk.Entry(settings_frame)
-    amount_entry.insert(0, "100000")
+    amount_entry.insert(0, config.get("total_investment", "100000"))
     amount_entry.grid(row=1, column=1, sticky='ew', padx=3)
 
     ttk.Label(settings_frame, text="그리드 개수:").grid(row=2, column=0, sticky='w', padx=3, pady=1)
     grid_entry = ttk.Entry(settings_frame)
-    grid_entry.insert(0, "10")
+    grid_entry.insert(0, config.get("grid_count", "10"))
     grid_entry.grid(row=2, column=1, sticky='ew', padx=3)
 
     auto_grid_var = tk.BooleanVar(value=config.get('auto_grid_count', True))
@@ -1376,7 +1436,7 @@ def start_dashboard():
 
     ttk.Label(settings_frame, text="가격 범위 기준:").grid(row=4, column=0, sticky='w', padx=3, pady=1)
     period_combo = ttk.Combobox(settings_frame, values=["1시간", "4시간", "1일", "7일"], state="readonly")
-    period_combo.set("4시간")
+    period_combo.set(config.get("period", "4시간"))
     period_combo.grid(row=4, column=1, sticky='ew', padx=3)
 
     def update_grid_count_on_period_change(event):
@@ -1405,10 +1465,10 @@ def start_dashboard():
 
     ttk.Label(settings_frame, text="목표 수익률 (%):").grid(row=5, column=0, sticky='w', padx=3, pady=1)
     target_entry = ttk.Entry(settings_frame)
-    target_entry.insert(0, "10")
+    target_entry.insert(0, config.get("target_profit_percent", "10"))
     target_entry.grid(row=5, column=1, sticky='ew', padx=3)
 
-    demo_var = tk.IntVar(value=1)
+    demo_var = tk.IntVar(value=config.get("demo_mode", 1))
     demo_check = ttk.Checkbutton(settings_frame, text="데모 모드", variable=demo_var)
     demo_check.grid(row=6, column=0, columnspan=2, sticky='w', padx=3, pady=3)
 
@@ -1557,7 +1617,7 @@ def start_dashboard():
                     except (ValueError, TypeError) as e:
                         print(f"로그 파싱 오류: {log} -> {e}")
                         continue
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             pass
 
         buy_scatter = None
@@ -1714,6 +1774,15 @@ def start_dashboard():
             return
 
         try:
+            # 현재 UI 설정값을 config에 저장
+            config["total_investment"] = amount_entry.get()
+            config["grid_count"] = grid_entry.get()
+            config["period"] = period_combo.get()
+            config["target_profit_percent"] = target_entry.get()
+            config["demo_mode"] = demo_var.get()
+            config["auto_grid_count"] = auto_grid_var.get()
+            save_config(config)
+
             selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
             if not selected_tickers:
                 messagebox.showwarning("경고", "거래할 코인을 하나 이상 선택해주세요.")
