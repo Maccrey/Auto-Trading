@@ -32,7 +32,8 @@ default_config = {
     "use_limit_orders": True,  # 지정가 주문 사용
     "limit_order_buffer": 0.2,  # 지정가 주문 버퍼 (%)
     "max_position_size": 0.3,  # 최대 포지션 크기 (총 자산 대비)
-    "emergency_exit_enabled": True  # 긴급 청산 활성화
+    "emergency_exit_enabled": True,  # 긴급 청산 활성화
+    "auto_grid_count": True # 그리드 개수 자동 계산
 }
 
 def load_config():
@@ -334,6 +335,22 @@ def calculate_price_range(ticker, period):
         print(f"가격 범위 계산 오류: {e}")
         return None, None
 
+def calculate_optimal_grid_count(high_price, low_price):
+    """가격 범위에 따라 최적의 그리드 개수를 계산"""
+    if low_price <= 0:
+        return 10  # 기본값
+
+    price_range_percent = ((high_price - low_price) / low_price) * 100
+    
+    if price_range_percent < 5:
+        return 20
+    elif price_range_percent < 10:
+        return 15
+    elif price_range_percent < 15:
+        return 10
+    else:
+        return 8
+
 # === 차트 데이터 가져오기 ===
 def get_chart_data(ticker, period):
     """차트용 데이터 가져오기"""
@@ -474,8 +491,26 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     update_gui('chart_data', high_price, low_price, grid_levels)
     
     total_realized_profit = 0
+    last_update_day = datetime.now().day
 
     while not stop_event.is_set():
+        # 9시 정각 그리드 자동 갱신
+        now = datetime.now()
+        if config.get('auto_grid_count', True) and now.hour == 9 and now.day != last_update_day:
+            log_trade(ticker, '정보', '오전 9시, 그리드 설정을 자동 갱신합니다.', lambda log: update_gui('log', log))
+            
+            new_high, new_low = calculate_price_range(ticker, period)
+            if new_high and new_low:
+                high_price, low_price = new_high, new_low
+                grid_count = calculate_optimal_grid_count(high_price, low_price)
+                price_gap = (high_price - low_price) / grid_count
+                grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
+                
+                log_trade(ticker, '설정 갱신', f"새 그리드: {grid_count}개, 범위: {low_price:,.0f}~{high_price:,.0f}", lambda log: update_gui('log', log))
+                update_gui('chart_data', high_price, low_price, grid_levels)
+            
+            last_update_day = now.day
+
         price = pyupbit.get_current_price(ticker)
         if price is None:
             time.sleep(10)
@@ -1084,19 +1119,23 @@ def start_dashboard():
     grid_entry.insert(0, "10")
     grid_entry.grid(row=2, column=1, sticky='ew', padx=3)
 
-    ttk.Label(settings_frame, text="가격 범위 기준:").grid(row=3, column=0, sticky='w', padx=3, pady=1)
+    auto_grid_var = tk.BooleanVar(value=config.get('auto_grid_count', True))
+    auto_grid_check = ttk.Checkbutton(settings_frame, text="그리드 개수 자동 변경", variable=auto_grid_var)
+    auto_grid_check.grid(row=3, column=0, columnspan=2, sticky='w', padx=3, pady=1)
+
+    ttk.Label(settings_frame, text="가격 범위 기준:").grid(row=4, column=0, sticky='w', padx=3, pady=1)
     period_combo = ttk.Combobox(settings_frame, values=["1시간", "4시간", "1일", "7일"], state="readonly")
     period_combo.set("1일")
-    period_combo.grid(row=3, column=1, sticky='ew', padx=3)
+    period_combo.grid(row=4, column=1, sticky='ew', padx=3)
 
-    ttk.Label(settings_frame, text="목표 수익률 (%):").grid(row=4, column=0, sticky='w', padx=3, pady=1)
+    ttk.Label(settings_frame, text="목표 수익률 (%):").grid(row=5, column=0, sticky='w', padx=3, pady=1)
     target_entry = ttk.Entry(settings_frame)
     target_entry.insert(0, "10")
-    target_entry.grid(row=4, column=1, sticky='ew', padx=3)
+    target_entry.grid(row=5, column=1, sticky='ew', padx=3)
 
     demo_var = tk.IntVar(value=1)
     demo_check = ttk.Checkbutton(settings_frame, text="데모 모드", variable=demo_var)
-    demo_check.grid(row=5, column=0, columnspan=2, sticky='w', padx=3, pady=3)
+    demo_check.grid(row=6, column=0, columnspan=2, sticky='w', padx=3, pady=3)
 
     # 중간 프레임 (차트)
     mid_frame = ttk.LabelFrame(main_frame, text="실시간 차트 및 그리드")
@@ -1384,9 +1423,24 @@ def start_dashboard():
                 messagebox.showwarning("경고", "거래할 코인을 하나 이상 선택해주세요.")
                 return
 
+            period = period_combo.get()
+
+            # 자동 그리드 개수 계산 로직
+            if auto_grid_var.get():
+                # 대표 티커(첫 번째 선택)를 기준으로 가격 범위 계산
+                representative_ticker = selected_tickers[0]
+                high_price, low_price = calculate_price_range(representative_ticker, period)
+                if high_price and low_price:
+                    new_grid_count = calculate_optimal_grid_count(high_price, low_price)
+                    grid_entry.delete(0, tk.END)
+                    grid_entry.insert(0, str(new_grid_count))
+                    log_trade(representative_ticker, '정보', f'자동 계산된 그리드: {new_grid_count}개', add_log_to_gui)
+                else:
+                    messagebox.showwarning("경고", f"{representative_ticker}의 가격 범위 계산에 실패하여 자동 그리드 계산을 중단합니다.")
+                    return
+
             total_investment = int(amount_entry.get())
             grid_count = int(grid_entry.get())
-            period = period_combo.get()
             demo_mode = bool(demo_var.get())
             target_profit = float(target_entry.get())
             
