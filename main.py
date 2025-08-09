@@ -57,7 +57,8 @@ default_config = {
     "limit_order_buffer": 0.2,  # 지정가 주문 버퍼 (%)
     "max_position_size": 0.3,  # 최대 포지션 크기 (총 자산 대비)
     "emergency_exit_enabled": True,  # 긴급 청산 활성화
-    "auto_grid_count": True # 그리드 개수 자동 계산
+    "auto_grid_count": True, # 그리드 개수 자동 계산
+    "tts_enabled": True # TTS 음성 안내 사용
 }
 
 def save_trading_state(ticker, positions, demo_mode):
@@ -635,8 +636,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         log_trade(ticker, "데모 매수", log_msg, lambda log: update_gui('log', log))
                         
                         # TTS 음성 안내
-                        tts_msg = f"데모 모드, 그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
-                        speak_async(tts_msg)
+                        if config.get('tts_enabled', True):
+                            tts_msg = f"데모 모드, 그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
+                            speak_async(tts_msg)
 
                         update_gui('refresh_chart')
             
@@ -683,8 +685,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     log_trade(ticker, "데모 매도", log_msg, lambda log: update_gui('log', log))
 
                     # TTS 음성 안내
-                    tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')} {price:,.0f}원에 매도되었습니다."
-                    speak_async(tts_msg)
+                    if config.get('tts_enabled', True):
+                        tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')} {price:,.0f}원에 매도되었습니다."
+                        speak_async(tts_msg)
 
                     update_gui('refresh_chart')
             
@@ -762,8 +765,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     log_trade(ticker, "실제 매수", log_msg, lambda log: update_gui('log', log))
 
                                     # TTS 음성 안내
-                                    tts_msg = f"그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
-                                    speak_async(tts_msg)
+                                    if config.get('tts_enabled', True):
+                                        tts_msg = f"그리드 {i+1}, {ticker.replace('KRW-','')} {price:,.0f}원에 매수되었습니다."
+                                        speak_async(tts_msg)
 
                                     update_gui('refresh_chart')
                         else:
@@ -798,8 +802,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         log_trade(ticker, "실제 매도", log_msg, lambda log: update_gui('log', log))
 
                         # TTS 음성 안내
-                        tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}, {price:,.0f}원에 매도되었습니다."
-                        speak_async(tts_msg)
+                        if config.get('tts_enabled', True):
+                            tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}, {price:,.0f}원에 매도되었습니다."
+                            speak_async(tts_msg)
 
                         update_gui('refresh_chart')
                     else:
@@ -888,11 +893,19 @@ def open_settings_window(root, config, callback):
     secret_entry = ttk.Entry(api_frame, textvariable=vars_dict['upbit_secret'], show='*', width=60)
     secret_entry.pack(fill='x', pady=(0, 10))
     
-    ttk.Label(api_frame, text="카카오톡 액세스 토큰:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=5)
+    # 알림 설정 탭
+    notification_frame = ttk.Frame(notebook)
+    notebook.add(notification_frame, text="알림 설정")
+
+    ttk.Label(notification_frame, text="카카오톡 액세스 토큰:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=(10, 5))
     vars_dict['kakao_token'] = tk.StringVar(value=config.get('kakao_token', ''))
-    kakao_entry = ttk.Entry(api_frame, textvariable=vars_dict['kakao_token'], show='*', width=60)
+    kakao_entry = ttk.Entry(notification_frame, textvariable=vars_dict['kakao_token'], show='*', width=60)
     kakao_entry.pack(fill='x', pady=(0, 10))
-    
+
+    vars_dict['tts_enabled'] = tk.BooleanVar(value=config.get('tts_enabled', True))
+    tts_check = ttk.Checkbutton(notification_frame, text="TTS 음성 안내 사용", variable=vars_dict['tts_enabled'])
+    tts_check.pack(anchor='w', pady=5)
+
     # 리스크 관리 탭
     risk_frame = ttk.Frame(notebook)
     notebook.add(risk_frame, text="리스크 관리")
