@@ -13,8 +13,8 @@
     "limit_order_buffer": 0.2,
     "max_position_size": 0.3,
     "total_investment": "100000000",
-    "grid_count": "8",
-    "period": "1시간",
+    "grid_count": "31",
+    "period": "4시간",
     "target_profit_percent": "10",
     "demo_mode": 1,
     "auto_grid_count": true

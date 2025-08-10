@@ -426,21 +426,46 @@ def calculate_price_range(ticker, period):
         print(f"가격 범위 계산 오류: {e}")
         return None, None
 
-def calculate_optimal_grid_count(high_price, low_price):
-    """가격 범위에 따라 최적의 그리드 개수를 계산"""
+def calculate_optimal_grid_count(high_price, low_price, target_profit_percent_overall, fee_rate=0.0005):
+    """
+    가격 범위, 목표 수익률, 수수료를 고려하여 최적의 그리드 개수를 계산
+    """
     if low_price <= 0:
         return 10  # 기본값
 
+    # 전체 가격 범위 백분율
     price_range_percent = ((high_price - low_price) / low_price) * 100
+
+    # 매수/매도 왕복 수수료율 (0.05% * 2 = 0.1%)
+    round_trip_fee_percent = (2 * fee_rate) * 100
+
+    # 그리드당 필요한 최소 가격 상승 비율 (수수료 커버 + 최소 이익)
+    # (1 + fee_rate) / (1 - fee_rate) - 1
+    min_price_increase_factor_for_profit = (1 + fee_rate) / (1 - fee_rate)
+    min_price_increase_percent_for_profit = (min_price_increase_factor_for_profit - 1) * 100
+
+    # 여기에 추가적인 목표 이익을 더함 (예: 0.05% 추가 이익)
+    # 이 값은 각 그리드 거래가 최소한 이만큼의 이익을 내야 함을 의미
+    effective_min_profit_per_grid_percent = min_price_increase_percent_for_profit + 0.05
+
+    # 전체 가격 범위에서 이 최소 수익률을 몇 번 달성할 수 있는지 계산
+    # 그리드 개수는 (전체 가격 범위 백분율 / 그리드당 유효 최소 수익률)
+    if effective_min_profit_per_grid_percent <= 0: # 0으로 나누는 것 방지
+        return 10 # 안전 기본값
+
+    calculated_grid_count = price_range_percent / effective_min_profit_per_grid_percent
+
+    # 그리드 개수는 정수여야 하며, 너무 많거나 적지 않도록 제한
+    # 최소 3개, 최대 50개 (기존 코드의 경고 메시지 참고)
+    final_grid_count = max(3, min(50, int(round(calculated_grid_count))))
     
-    if price_range_percent < 5:
-        return 8
-    elif price_range_percent < 10:
-        return 6
-    elif price_range_percent < 15:
-        return 5
-    else:
-        return 4
+    # 가격 범위가 너무 작아서 계산된 그리드 개수가 3개 미만으로 나오면,
+    # 최소 3개 그리드를 유지하되, 각 그리드 간격이 수수료를 커버하는지 확인
+    # (이 부분은 그리드 생성 로직에서 처리될 수 있음)
+    if final_grid_count < 3:
+        return 3
+
+    return final_grid_count
 
 # 차트 데이터 가져오기
 def get_chart_data(ticker, period):
@@ -497,7 +522,7 @@ def run_backtest(ticker, total_investment, grid_count, period, stop_loss_thresho
             low_price = df['low'].min()
 
         if auto_grid:
-            grid_count = calculate_optimal_grid_count(high_price, low_price)
+            grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), fee_rate)
 
         price_gap = (high_price - low_price) / grid_count
         amount_per_grid = total_investment / grid_count
@@ -695,7 +720,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             new_high, new_low = calculate_price_range(ticker, period)
             if new_high and new_low:
                 high_price, low_price = new_high, new_low
-                grid_count = calculate_optimal_grid_count(high_price, low_price)
+                grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), fee_rate)
                 price_gap = (high_price - low_price) / grid_count
                 grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
                 
@@ -772,7 +797,20 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         })
                         save_trading_state(ticker, demo_positions, True)
                         
-                        log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({quantity:.6f}개) → 목표: {target_sell_price:,.0f}원"
+                        # 예상 수익률 계산 (수수료 0.05% 감안)
+                        # 매수 시: price * (1 + fee_rate)
+                        # 매도 시: target_sell_price * (1 - fee_rate)
+                        # 순이익 = 매도 금액 - 매수 금액
+                        # 순이익률 = (순이익 / 매수 금액) * 100
+                        buy_cost_with_fee = price * (1 + fee_rate)
+                        sell_value_after_fee = target_sell_price * (1 - fee_rate)
+                        
+                        if buy_cost_with_fee > 0:
+                            expected_profit_percent = ((sell_value_after_fee - buy_cost_with_fee) / buy_cost_with_fee) * 100
+                            log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({quantity:.6f}개) → 목표: {target_sell_price:,.0f}원 (예상 수익: {expected_profit_percent:.2f}%)"
+                        else:
+                            log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({quantity:.6f}개) → 목표: {target_sell_price:,.0f}원"
+
                         if panic_mode:
                             log_msg += " [급락대응]"
                         log_trade(ticker, "데모 매수", log_msg, lambda log: update_gui('log', log))
@@ -911,7 +949,16 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     save_trading_state(ticker, real_positions, False)
                                     total_invested += actual_buy_amount
                                     
-                                    log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({executed_volume:.6f}개) → 목표: {target_sell_price:,.0f}원"
+                                    # 예상 수익률 계산 (수수료 0.05% 감안)
+                                    buy_cost_with_fee = price * (1 + fee_rate)
+                                    sell_value_after_fee = target_sell_price * (1 - fee_rate)
+                                    
+                                    if buy_cost_with_fee > 0:
+                                        expected_profit_percent = ((sell_value_after_fee - buy_cost_with_fee) / buy_cost_with_fee) * 100
+                                        log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({executed_volume:.6f}개) → 목표: {target_sell_price:,.0f}원 (예상 수익: {expected_profit_percent:.2f}%)"
+                                    else:
+                                        log_msg = f"그리드{i+1} 매수: {price:,.0f}원 ({executed_volume:.6f}개) → 목표: {target_sell_price:,.0f}원"
+
                                     if panic_mode:
                                         log_msg += " [급락대응]"
                                     log_trade(ticker, "실제 매수", log_msg, lambda log: update_gui('log', log))
@@ -1498,7 +1545,7 @@ def start_dashboard():
                 high_price, low_price = calculate_price_range(representative_ticker, period)
                 
                 if high_price and low_price:
-                    new_grid_count = calculate_optimal_grid_count(high_price, low_price)
+                    new_grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), 0.0005)
                     grid_entry.delete(0, tk.END)
                     grid_entry.insert(0, str(new_grid_count))
                     log_trade(representative_ticker, '정보', f'{period} 기준, 자동 계산된 그리드: {new_grid_count}개', add_log_to_gui)
@@ -1842,7 +1889,7 @@ def start_dashboard():
                 representative_ticker = selected_tickers[0]
                 high_price, low_price = calculate_price_range(representative_ticker, period)
                 if high_price and low_price:
-                    new_grid_count = calculate_optimal_grid_count(high_price, low_price)
+                    new_grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), 0.0005)
                     grid_entry.delete(0, tk.END)
                     grid_entry.insert(0, str(new_grid_count))
                     log_trade(representative_ticker, '정보', f'자동 계산된 그리드: {new_grid_count}개', add_log_to_gui)
