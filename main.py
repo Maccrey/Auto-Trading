@@ -315,6 +315,7 @@ def export_to_excel(filename=None):
                 # 4. 내부 상태 저장소 초기화
                 all_ticker_total_values.clear()
                 all_ticker_start_balances.clear()
+                profits_data.clear()
     
             except Exception as e:
                 messagebox.showerror("오류", f"데이터 초기화 중 오류 발생: {e}")
@@ -1461,12 +1462,20 @@ def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_p
     for item in log_tree.get_children():
         log_tree.delete(item)
 
-    # Reset detail_labels
-    for label in detail_labels.values():
-        label.config(text="")
+    # 2. 각 티커별 상세 정보 초기화
+    # 2. 각 티커별 상세 정보 초기화 (이 부분은 이미 clear_all_data 함수 내에 있으므로 중복 제거)
+    for ticker in tickers:
+        detail_labels[ticker]['profit'].config(text="평가수익: 0원", style="Gray.TLabel")
+        detail_labels[ticker]['profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
+        detail_labels[ticker]['realized_profit'].config(text="실현수익: 0원", style="Gray.TLabel")
+        detail_labels[ticker]['realized_profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
+        detail_labels[ticker]['cash'].config(text="현금: 0원", style="Gray.TLabel")
+        detail_labels[ticker]['coin_qty'].config(text="보유: 0개", style="Gray.TLabel")
+        detail_labels[ticker]['coin_value'].config(text="코인가치: 0원", style="Gray.TLabel")
+        detail_labels[ticker]['total_value'].config(text="총자산: 0원", style="Gray.TLabel")
+
 
     # Clear tickers and related data structures
-    tickers.clear()
     all_ticker_total_values.clear()
     all_ticker_start_balances.clear()
 

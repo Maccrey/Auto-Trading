@@ -14,8 +14,8 @@
     "tts_enabled": true,
     "kakao_enabled": true,
     "total_investment": "100000000",
-    "grid_count": "35",
-    "period": "4시간",
+    "grid_count": "29",
+    "period": "1시간",
     "target_profit_percent": "10",
     "demo_mode": 1
 }
