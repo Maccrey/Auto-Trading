@@ -802,9 +802,13 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
         try:
             price = pyupbit.get_current_price(ticker)
-            if price is None:
-                time.sleep(1) # None을 반환하는 경우 잠시 후 재시도
+            if price is None: # None을 반환하는 경우 잠시 후 재시도
+                time.sleep(1)
                 continue
+        except KeyError as e: # 가격 데이터 형식 오류 처리
+            log_trade(ticker, '오류', f'가격 데이터 조회 오류 (KeyError): {e}', lambda log: update_gui('log', log))
+            time.sleep(5) # 데이터 형식 오류 시 잠시 대기
+            continue
         except requests.exceptions.RequestException as e:
             log_trade(ticker, '오류', f'네트워크 오류 발생: {e}', lambda log: update_gui('log', log))
             time.sleep(10) # 네트워크 불안정시 더 길게 대기
