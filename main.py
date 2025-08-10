@@ -92,7 +92,7 @@ default_config = {
     "total_investment": "100000",
     "grid_count": "10",
     "period": "4시간",
-    "target_profit_percent": "10",
+    "target_profit_percent": "",
     "demo_mode": 1
 }
 
@@ -322,28 +322,7 @@ def export_to_excel(filename=None):
             except Exception as e:
                 messagebox.showerror("오류", f"데이터 초기화 중 오류 발생: {e}")
     
-    def toggle_trading():
-        """거래 시작/중지"""
-    """수익 데이터 업데이트"""
-    try:
-        try:
-            with open(profit_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
-            data = {}
-        
-        if ticker not in data:
-            data[ticker] = []
-        data[ticker].append({
-            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'profit': profit
-        })
-        
-        with open(profit_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-            
-    except Exception as e:
-        print(f"수익 파일 처리 중 오류 발생: {e}")
+    
 
 def log_trade(ticker, action, price, log_callback=None):
     """거래 로그 기록"""
@@ -497,7 +476,7 @@ def calculate_price_range(ticker, period):
         print(f"가격 범위 계산 오류: {e}")
         return None, None
 
-def calculate_optimal_grid_count(high_price, low_price, target_profit_percent_overall, fee_rate=0.0005):
+def calculate_optimal_grid_count(high_price, low_price, target_profit_percent, fee_rate=0.0005):
     """
     가격 범위, 목표 수익률, 수수료를 고려하여 최적의 그리드 개수를 계산
     """
@@ -559,7 +538,7 @@ def get_chart_data(ticker, period):
         return None
 
 # 백테스트 모듈
-def run_backtest(ticker, total_investment, grid_count, period, stop_loss_threshold, use_trailing_stop, trailing_stop_percent, auto_grid):
+def run_backtest(ticker, total_investment, grid_count, period, stop_loss_threshold, use_trailing_stop, trailing_stop_percent, auto_grid, target_profit_percent):
     """상세 백테스트 실행"""
     try:
         # 기간에 따라 데이터 가져오기
@@ -593,7 +572,14 @@ def run_backtest(ticker, total_investment, grid_count, period, stop_loss_thresho
             low_price = df['low'].min()
 
         if auto_grid:
-            grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), fee_rate)
+            if target_profit_percent and target_profit_percent.strip():
+                try:
+                    target_profit = float(target_profit_percent)
+                except (ValueError, TypeError):
+                    target_profit = 10.0 # 기본값
+            else:
+                target_profit = 10.0 # 기본값
+            grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit, fee_rate)
 
         price_gap = (high_price - low_price) / grid_count
         amount_per_grid = total_investment / grid_count
@@ -698,10 +684,19 @@ def run_backtest(ticker, total_investment, grid_count, period, stop_loss_thresho
 
 
 # 개선된 그리드 트레이딩 로직
-def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
+def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent_str, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
     start_time = datetime.now()
-    
+
+    # 목표 수익률 처리
+    if target_profit_percent_str and target_profit_percent_str.strip():
+        try:
+            target_profit_percent = float(target_profit_percent_str)
+        except (ValueError, TypeError):
+            target_profit_percent = float('inf') # 잘못된 값이면 무한으로 처리
+    else:
+        target_profit_percent = float('inf') # 미지정이면 무한으로 처리
+
     def update_gui(key, *args):
         gui_queue.put((key, ticker, args))
 
@@ -793,7 +788,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             new_high, new_low = calculate_price_range(ticker, period)
             if new_high and new_low:
                 high_price, low_price = new_high, new_low
-                grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), fee_rate)
+                grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit_percent, fee_rate)
                 price_gap = (high_price - low_price) / grid_count
                 grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
                 
@@ -1399,7 +1394,7 @@ def open_settings_window(root, config, callback, grid_update_callback=None):
     ttk.Button(button_frame, text="취소", command=settings_window.destroy).pack(side='right')
 
 # 백테스트 창
-def open_backtest_window(root, main_settings):
+def open_backtest_window(root, main_amount, main_grid_count, main_period, main_auto_grid):
     """백테스트 창 열기"""
     bt_window = tk.Toplevel(root)
     bt_window.title("백테스트")
@@ -1420,15 +1415,16 @@ def open_backtest_window(root, main_settings):
         'stop_loss': tk.DoubleVar(value=config.get('stop_loss_threshold', -10.0)),
         'trailing_stop': tk.BooleanVar(value=config.get('trailing_stop', True)),
         'trailing_percent': tk.DoubleVar(value=config.get('trailing_stop_percent', 3.0)),
-        'auto_grid': tk.BooleanVar(value=True)
+        'auto_grid': tk.BooleanVar(value=True),
+        'target_profit': tk.StringVar(value=config.get("target_profit_percent", ""))
     }
 
     def load_main_settings():
         """메인 설정 불러오기"""
-        vars_dict['amount'].set(main_settings['amount'].get())
-        vars_dict['grid_count'].set(main_settings['grid_count'].get())
-        vars_dict['period'].set(main_settings['period'].get())
-        vars_dict['auto_grid'].set(main_settings['auto_grid'].get())
+        vars_dict['amount'].set(main_amount)
+        vars_dict['grid_count'].set(main_grid_count)
+        vars_dict['period'].set(main_period)
+        vars_dict['auto_grid'].set(main_auto_grid)
         # 리스크 설정은 config에서 직접 가져옴
         vars_dict['stop_loss'].set(config.get('stop_loss_threshold', -10.0))
         vars_dict['trailing_stop'].set(config.get('trailing_stop', True))
@@ -1468,6 +1464,10 @@ def open_backtest_window(root, main_settings):
     trailing_percent_entry = ttk.Entry(settings_frame, textvariable=vars_dict['trailing_percent'])
     trailing_percent_entry.grid(row=8, column=1, sticky='ew', padx=5)
 
+    ttk.Label(settings_frame, text="목표 수익률 (%):").grid(row=9, column=0, sticky='w', padx=5, pady=5)
+    target_profit_entry = ttk.Entry(settings_frame, textvariable=vars_dict['target_profit'])
+    target_profit_entry.grid(row=9, column=1, sticky='ew', padx=5)
+
     settings_frame.grid_columnconfigure(1, weight=1)
     
     # 결과 프레임
@@ -1497,7 +1497,8 @@ def open_backtest_window(root, main_settings):
                 stop_loss_threshold=params['stop_loss'],
                 use_trailing_stop=params['trailing_stop'],
                 trailing_stop_percent=params['trailing_percent'],
-                auto_grid=params['auto_grid']
+                auto_grid=params['auto_grid'],
+                target_profit_percent=params['target_profit']
             )
             
             if result:
@@ -1714,6 +1715,63 @@ def start_dashboard():
     period_combo.set(config.get("period", "4시간"))
     period_combo.grid(row=4, column=1, sticky='ew', padx=3)
 
+    target_entry = ttk.Entry(settings_frame)
+    target_entry.insert(0, config.get("target_profit_percent", ""))
+    target_entry.grid(row=5, column=1, sticky='ew', padx=3)
+
+    demo_var = tk.IntVar(value=config.get("demo_mode", 1))
+    demo_check = ttk.Checkbutton(settings_frame, text="데모 모드", variable=demo_var)
+    demo_check.grid(row=6, column=0, columnspan=2, sticky='w', padx=3, pady=3)
+
+    def toggle_trading_logic():
+        """거래 시작/중지 로직"""
+        if not initialize_upbit() and not demo_var.get():
+            messagebox.showerror("오류", "업비트 API 키가 유효하지 않습니다.")
+            return
+
+        selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
+        if not selected_tickers:
+            messagebox.showwarning("경고", "거래할 코인을 선택해주세요.")
+            return
+
+        try:
+            total_investment = float(amount_entry.get())
+            grid_count = int(grid_entry.get())
+            target_profit_percent_str = target_entry.get()
+            period = period_combo.get()
+            demo_mode = demo_var.get()
+        except ValueError:
+            messagebox.showerror("오류", "투자 금액과 그리드 개수는 숫자여야 합니다.")
+            return
+
+        for ticker in selected_tickers:
+            if ticker not in active_trades:
+                stop_event = threading.Event()
+                active_trades[ticker] = stop_event
+                
+                trade_thread = threading.Thread(
+                    target=grid_trading,
+                    args=(
+                        ticker, grid_count, total_investment, demo_mode,
+                        target_profit_percent_str, period, stop_event, gui_queue,
+                        total_profit_label, total_profit_rate_label,
+                        all_ticker_total_values, all_ticker_start_balances, profits_data
+                    ),
+                    daemon=True
+                )
+                trade_thread.start()
+                status_labels[ticker].config(text="상태: 시작중...", style="Blue.TLabel")
+                toggle_button.config(text="거래 정지")
+            else:
+                stop_event = active_trades.pop(ticker)
+                stop_event.set()
+                status_labels[ticker].config(text="상태: 중지됨", style="Orange.TLabel")
+                if not active_trades:
+                    toggle_button.config(text="거래 시작")
+
+    toggle_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading_logic)
+    toggle_button.grid(row=7, column=0, columnspan=2, pady=10)
+
     def update_grid_count_on_period_change(event):
         if auto_grid_var.get():
             try:
@@ -1726,8 +1784,42 @@ def start_dashboard():
                 period = period_combo.get()
                 high_price, low_price = calculate_price_range(representative_ticker, period)
                 
+                target_profit_str = target_entry.get()
+                if target_profit_str and target_profit_str.strip():
+                    target_profit = float(target_profit_str)
+                else:
+                    target_profit = float('inf') # 미지정이면 무한으로 처리
+
                 if high_price and low_price:
-                    new_grid_count = calculate_optimal_grid_count(high_price, low_price, float(config.get("target_profit_percent", "10")), 0.0005)
+                    new_grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit, 0.0005)
+                    grid_entry.delete(0, tk.END)
+                    grid_entry.insert(0, str(new_grid_count))
+                    log_trade(representative_ticker, '정보', f'{period} 기준, 자동 계산된 그리드: {new_grid_count}개', add_log_to_gui)
+                else:
+                    log_trade(representative_ticker, '오류', f'{period} 기준 가격 범위 계산 실패', add_log_to_gui)
+            except Exception as e:
+                print(f"그리드 자동 계산 오류: {e}")
+    
+    def update_grid_count_on_period_change(event):
+        if auto_grid_var.get():
+            try:
+                selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
+                if not selected_tickers:
+                    representative_ticker = "KRW-BTC"
+                else:
+                    representative_ticker = selected_tickers[0]
+
+                period = period_combo.get()
+                high_price, low_price = calculate_price_range(representative_ticker, period)
+                
+                target_profit_str = target_entry.get()
+                if target_profit_str and target_profit_str.strip():
+                    target_profit = float(target_profit_str)
+                else:
+                    target_profit = 10.0 # 기본값
+
+                if high_price and low_price:
+                    new_grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit, 0.0005)
                     grid_entry.delete(0, tk.END)
                     grid_entry.insert(0, str(new_grid_count))
                     log_trade(representative_ticker, '정보', f'{period} 기준, 자동 계산된 그리드: {new_grid_count}개', add_log_to_gui)
@@ -1738,7 +1830,7 @@ def start_dashboard():
 
     period_combo.bind("<<ComboboxSelected>>", update_grid_count_on_period_change)
 
-    ttk.Label(settings_frame, text="목표 수익률 (%):").grid(row=5, column=0, sticky='w', padx=3, pady=1)
+    ttk.Label(settings_frame, text="목표 수익률 (%) (미지정 시 무한):").grid(row=5, column=0, sticky='w', padx=3, pady=1)
     target_entry = ttk.Entry(settings_frame)
     target_entry.insert(0, config.get("target_profit_percent", "10"))
     target_entry.grid(row=5, column=1, sticky='ew', padx=3)
@@ -1747,17 +1839,15 @@ def start_dashboard():
     demo_check = ttk.Checkbutton(settings_frame, text="데모 모드", variable=demo_var)
     demo_check.grid(row=6, column=0, columnspan=2, sticky='w', padx=3, pady=3)
 
-    main_settings = {
-        'amount': amount_entry,
-        'grid_count': grid_entry,
-        'period': period_combo,
-        'auto_grid': auto_grid_var
-    }
+    toggle_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading_logic)
+    toggle_button.grid(row=7, column=0, columnspan=2, pady=10)
+
+    
 
     ttk.Button(settings_icon_frame, text="⚙️ 시스템 설정", 
                command=lambda: open_settings_window(root, config, update_config, update_grid_count_on_period_change)).pack(side='left')
     ttk.Button(settings_icon_frame, text="📊 백테스트", 
-               command=lambda: open_backtest_window(root, main_settings)).pack(side='left', padx=(10, 0))
+               command=lambda: open_backtest_window(root, amount_entry.get(), grid_entry.get(), period_combo.get(), auto_grid_var.get())).pack(side='left', padx=(10, 0))
     def export_data_to_excel():
         success, filename = export_to_excel()
         if success:
@@ -2151,7 +2241,7 @@ def start_dashboard():
             messagebox.showerror("오류", "숫자 입력값들을 확인해주세요.")
             control_button.config(text="거래 시작")
 
-    control_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading)
+    control_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading_logic)
     control_button.grid(row=7, column=0, columnspan=2, sticky='ew', pady=8, padx=3)
 
     # 설명 라벨 추가
