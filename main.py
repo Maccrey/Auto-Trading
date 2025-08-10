@@ -121,18 +121,7 @@ def load_trading_state(ticker, demo_mode):
             return []
 
 
-def load_config():
-    """설정 파일 로드"""
-    try:
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        # 기본값으로 누락된 키 채우기
-        for key, value in default_config.items():
-            if key not in config:
-                config[key] = value
-        return config
-    except (FileNotFoundError, json.JSONDecodeError):
-        return default_config.copy()
+
 
 def save_config(config):
     """설정 파일 저장"""
@@ -145,7 +134,7 @@ def save_config(config):
         return False
 
 # 전역 설정
-config = load_config()
+
 upbit = None
 
 def initialize_upbit():
@@ -159,6 +148,40 @@ def initialize_upbit():
             print(f"업비트 API 초기화 실패: {e}")
             return False
     return False
+
+def load_config():
+    """설정 파일 로드"""
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+            # 기본 설정과 로드된 설정을 병합 (새로운 설정 추가 시 기존 파일에 반영)
+            merged_config = default_config.copy()
+            merged_config.update(config_data)
+            return merged_config
+    except (FileNotFoundError, json.JSONDecodeError):
+        # 파일이 없거나 JSON 형식이 잘못된 경우 기본 설정 사용 및 저장
+        save_config(default_config)
+        return default_config
+
+config = load_config()
+
+def update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
+    profits_data[ticker] = profits_data.get(ticker, 0) + profit_percent
+    with open('profits.json', 'w') as f:
+        json.dump(profits_data, f)
+
+    total_profit_percent = sum(profits_data.values())
+    total_profit_label.config(text=f"Total Profit: {total_profit_percent:.2f}%")
+
+    # Calculate total profit rate based on all_ticker_total_values and all_ticker_start_balances
+    total_current_value = sum(all_ticker_total_values.values())
+    total_start_balance = sum(all_ticker_start_balances.values())
+
+    if total_start_balance > 0:
+        overall_profit_rate = ((total_current_value - total_start_balance) / total_start_balance) * 100
+        total_profit_rate_label.config(text=f"Overall Profit Rate: {overall_profit_rate:.2f}%")
+    else:
+        total_profit_rate_label.config(text="Overall Profit Rate: N/A")
 
 # 카카오톡 알림 API
 def send_kakao_message(message):
@@ -194,6 +217,14 @@ def initialize_files():
             else:
                 with open(file, 'w', encoding='utf-8') as f:
                     json.dump({}, f)
+
+def load_profits_data():
+    try:
+        with open(profit_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
 
 def export_to_excel(filename=None):
     """로그와 수익 데이터를 엑셀로 내보내기"""
@@ -252,7 +283,7 @@ def export_to_excel(filename=None):
         print(f"엑셀 내보내기 오류: {e}")
         return False, str(e)
 
-    def clear_all_data():
+    def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances):
         """profits.json, trade_logs.json, trading_state.json 파일을 초기화하고 GUI를 업데이트합니다."""
         if messagebox.askokcancel("데이터 초기화", "모든 거래 기록과 상태 데이터를 초기화하시겠습니까? 이 작업은 되돌릴 수 없습니다."):
             try:
@@ -260,7 +291,7 @@ def export_to_excel(filename=None):
                     with open(file_path, 'w', encoding='utf-8') as f:
                         json.dump({}, f, indent=4, ensure_ascii=False)
                 messagebox.showinfo("초기화 완료", "모든 거래 기록과 상태 데이터가 초기화되었습니다.")
-
+    
                 # GUI 초기화
                 # 1. 로그 트리 초기화
                 for item in log_tree.get_children():
@@ -280,14 +311,14 @@ def export_to_excel(filename=None):
                 # 3. 전체 총자산 수익금 및 수익률 초기화
                 total_profit_label.config(text="총자산 수익금: 0원", style="Black.TLabel")
                 total_profit_rate_label.config(text="총자산 수익률: (0.00%)", style="Black.TLabel")
-
+    
                 # 4. 내부 상태 저장소 초기화
                 all_ticker_total_values.clear()
                 all_ticker_start_balances.clear()
-
+    
             except Exception as e:
                 messagebox.showerror("오류", f"데이터 초기화 중 오류 발생: {e}")
-
+    
     def toggle_trading():
         """거래 시작/중지"""
     """수익 데이터 업데이트"""
@@ -661,8 +692,10 @@ def run_backtest(ticker, total_investment, grid_count, period, stop_loss_thresho
         traceback.print_exc()
         return None
 
+
+
 # 개선된 그리드 트레이딩 로직
-def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent, period, stop_event, gui_queue):
+def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
     start_time = datetime.now()
     
@@ -1080,7 +1113,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                 update_gui('details', current_balance, coin_balance, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent)
 
-        update_profit(ticker, profit_percent)
+        update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data)
         
         status, style = evaluate_status(profit_percent, True, panic_mode)
         update_gui('status', f"상태: {status}", style, True, panic_mode)
@@ -1423,6 +1456,34 @@ def open_backtest_window(root, main_settings):
     
     ttk.Button(bt_window, text="백테스트 실행", command=run_bt).pack(pady=10)
 
+def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances):
+    # Clear log_tree
+    for item in log_tree.get_children():
+        log_tree.delete(item)
+
+    # Reset detail_labels
+    for label in detail_labels.values():
+        label.config(text="")
+
+    # Clear tickers and related data structures
+    tickers.clear()
+    all_ticker_total_values.clear()
+    all_ticker_start_balances.clear()
+
+    # Reset total profit labels
+    total_profit_label.config(text="Total Profit: 0.00 (0.00%)")
+    total_profit_rate_label.config(text="")
+
+    # Clear JSON files
+    for filename in ["profits.json", "trade_logs.json", "trading_state.json"]:
+        try:
+            with open(filename, 'w') as f:
+                json.dump({}, f)  # Write an empty JSON object
+        except Exception as e:
+            print(f"Error clearing {filename}: {e}")
+
+    print("All data cleared.")
+
 
 
 # GUI 대시보드
@@ -1441,12 +1502,13 @@ def start_dashboard():
     chart_data = {}
     all_ticker_total_values = {} # 각 티커의 현재 총 자산 가치
     all_ticker_start_balances = {} # 각 티커의 시작 자본
+    profits_data = load_profits_data() # 수익 데이터 로드
     global config, upbit, total_profit_label, total_profit_rate_label # Declare global for new labels
 
     start_tts_worker()
 
     root = tk.Tk()
-    root.title("그리드 투자 자동매매 대시보드 v2.0")
+    root.title("그리드 투자 자동매매 대시보드 v2.5")
     root.geometry("1400x900")
 
     def on_closing():
@@ -1632,7 +1694,7 @@ def start_dashboard():
     ttk.Button(settings_icon_frame, text="📄 엑셀 내보내기", 
                command=export_data_to_excel).pack(side='left', padx=(10, 0))
     ttk.Button(settings_icon_frame, text="데이터 초기화", 
-               command=clear_all_data).pack(side='left', padx=(10, 0))
+               command=lambda: clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances)).pack(side='left', padx=(10, 0))
 
     # 중간 프레임 (차트)
     mid_frame = ttk.LabelFrame(main_frame, text="실시간 차트 및 그리드")
@@ -2006,7 +2068,7 @@ def start_dashboard():
 
                 thread = threading.Thread(
                     target=grid_trading,
-                    args=(ticker, grid_count, total_investment, demo_mode, target_profit, period, stop_event, gui_queue),
+                    args=(ticker, grid_count, total_investment, demo_mode, target_profit, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data),
                     daemon=True
                 )
                 thread.start()
