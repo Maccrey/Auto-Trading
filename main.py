@@ -1947,7 +1947,7 @@ def start_dashboard():
                     total_sum_current_value = sum(all_ticker_total_values.values())
                     total_sum_initial_investment = sum(all_ticker_start_balances.values())
 
-                    overall_profit = total_sum_current_value - total_sum_initial_investment
+                    overall_profit = total_realized_profit
                     overall_profit_percent = (overall_profit / total_sum_initial_investment) * 100 if total_sum_initial_investment > 0 else 0
 
                     # 전체 총자산 수익금 및 수익률 라벨 업데이트

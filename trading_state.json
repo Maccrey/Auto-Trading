@@ -1,20 +1,36 @@
 {
-    "demo_KRW-XRP": [
-        {
-            "buy_price": 4459.0902857142855,
-            "quantity": 640.7256642841118,
-            "target_sell_price": 4465.410857142857,
-            "actual_buy_price": 4457.0,
-            "highest_price": 4457.0
-        }
-    ],
     "demo_KRW-ETH": [
         {
-            "buy_price": 5812404.0,
-            "quantity": 0.49134795005407533,
-            "target_sell_price": 5823988.0,
-            "actual_buy_price": 5812000.0,
-            "highest_price": 5812000.0
+            "buy_price": 5797591.578947368,
+            "quantity": 0.4537283349827043,
+            "target_sell_price": 5808854.2105263155,
+            "actual_buy_price": 5797000.0,
+            "highest_price": 5802000.0
+        },
+        {
+            "buy_price": 5786328.947368421,
+            "quantity": 0.4547481255004732,
+            "target_sell_price": 5797591.578947368,
+            "actual_buy_price": 5784000.0,
+            "highest_price": 5784000.0
+        }
+    ],
+    "demo_KRW-XRP": [
+        {
+            "buy_price": 4467.573157894737,
+            "quantity": 588.8209442343266,
+            "target_sell_price": 4473.700499999999,
+            "actual_buy_price": 4467.0,
+            "highest_price": 4467.0
+        }
+    ],
+    "demo_KRW-BTC": [
+        {
+            "buy_price": 162549894.7368421,
+            "quantity": 0.016183745010889015,
+            "target_sell_price": 162784083.68421054,
+            "actual_buy_price": 162525000.0,
+            "highest_price": 162525000.0
         }
     ]
 }
