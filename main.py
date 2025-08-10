@@ -308,9 +308,9 @@ def export_to_excel(filename=None):
                     detail_labels[ticker]['coin_value'].config(text="코인가치: 0원", style="Gray.TLabel")
                     detail_labels[ticker]['total_value'].config(text="총자산: 0원", style="Gray.TLabel")
                 
-                # 3. 전체 총자산 수익금 및 수익률 초기화
-                total_profit_label.config(text="총자산 수익금: 0원", style="Black.TLabel")
-                total_profit_rate_label.config(text="총자산 수익률: (0.00%)", style="Black.TLabel")
+                # 3. 전체 총실현수익 및 수익률 초기화
+                total_profit_label.config(text="총 실현수익: 0원", style="Black.TLabel")
+                total_profit_rate_label.config(text="총 실현수익률: (0.00%)", style="Black.TLabel")
     
                 # 4. 내부 상태 저장소 초기화
                 all_ticker_total_values.clear()
@@ -1484,8 +1484,8 @@ def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_p
     all_ticker_start_balances.clear()
 
     # Reset total profit labels
-    total_profit_label.config(text="Total Profit: 0.00 (0.00%)")
-    total_profit_rate_label.config(text="")
+    total_profit_label.config(text="총 실현수익: 0원", style="Black.TLabel")
+    total_profit_rate_label.config(text="총 실현수익률: (0.00%)", style="Black.TLabel")
 
     # Clear JSON files
     for filename in ["profits.json", "trade_logs.json", "trading_state.json"]:
@@ -1619,11 +1619,11 @@ def start_dashboard():
             sep = ttk.Separator(ticker_frame, orient='horizontal')
             sep.grid(row=i*5+4, column=0, columnspan=4, sticky='ew', pady=3)
 
-    # 총자산 수익금 및 수익률 표시 라벨
-    total_profit_label = ttk.Label(ticker_frame, text="총자산 수익금: 0원", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
+    # 총 실현수익 및 수익률 표시 라벨
+    total_profit_label = ttk.Label(ticker_frame, text="총 실현수익: 0원", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
     total_profit_label.grid(row=len(tickers)*5 + 5, column=0, columnspan=2, sticky='w', padx=3, pady=5)
 
-    total_profit_rate_label = ttk.Label(ticker_frame, text="총자산 수익률: (0.00%)", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
+    total_profit_rate_label = ttk.Label(ticker_frame, text="총 실현수익률: (0.00%)", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
     total_profit_rate_label.grid(row=len(tickers)*5 + 5, column=2, columnspan=2, sticky='w', padx=3, pady=5)
 
     # 그리드 투자 설정
@@ -1963,9 +1963,9 @@ def start_dashboard():
                     overall_profit = total_realized_profit
                     overall_profit_percent = (overall_profit / total_sum_initial_investment) * 100 if total_sum_initial_investment > 0 else 0
 
-                    # 전체 총자산 수익금 및 수익률 라벨 업데이트
-                    total_profit_label.config(text=f"총자산 수익금: {overall_profit:,.0f}원", style=get_profit_color_style(overall_profit))
-                    total_profit_rate_label.config(text=f"총자산 수익률: ({overall_profit_percent:+.2f}%)", style=get_profit_color_style(overall_profit))
+                    # 전체 총실현수익 및 수익률 라벨 업데이트
+                    total_profit_label.config(text=f"총 실현수익: {overall_profit:,.0f}원", style=get_profit_color_style(overall_profit))
+                    total_profit_rate_label.config(text=f"총 실현수익률: ({overall_profit_percent:+.2f}%)", style=get_profit_color_style(overall_profit))
                 elif key == 'chart_data':
                     high_price, low_price, grid_levels = args
                     chart_data[ticker] = (high_price, low_price, grid_levels)
