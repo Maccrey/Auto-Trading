@@ -252,7 +252,44 @@ def export_to_excel(filename=None):
         print(f"엑셀 내보내기 오류: {e}")
         return False, str(e)
 
-def update_profit(ticker, profit):
+    def clear_all_data():
+        """profits.json, trade_logs.json, trading_state.json 파일을 초기화하고 GUI를 업데이트합니다."""
+        if messagebox.askokcancel("데이터 초기화", "모든 거래 기록과 상태 데이터를 초기화하시겠습니까? 이 작업은 되돌릴 수 없습니다."):
+            try:
+                for file_path in [profit_file, log_file, state_file]:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump({}, f, indent=4, ensure_ascii=False)
+                messagebox.showinfo("초기화 완료", "모든 거래 기록과 상태 데이터가 초기화되었습니다.")
+
+                # GUI 초기화
+                # 1. 로그 트리 초기화
+                for item in log_tree.get_children():
+                    log_tree.delete(item)
+                
+                # 2. 각 티커별 상세 정보 초기화
+                for ticker in tickers:
+                    detail_labels[ticker]['profit'].config(text="평가수익: 0원", style="Gray.TLabel")
+                    detail_labels[ticker]['profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
+                    detail_labels[ticker]['realized_profit'].config(text="실현수익: 0원", style="Gray.TLabel")
+                    detail_labels[ticker]['realized_profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
+                    detail_labels[ticker]['cash'].config(text="현금: 0원", style="Gray.TLabel")
+                    detail_labels[ticker]['coin_qty'].config(text="보유: 0개", style="Gray.TLabel")
+                    detail_labels[ticker]['coin_value'].config(text="코인가치: 0원", style="Gray.TLabel")
+                    detail_labels[ticker]['total_value'].config(text="총자산: 0원", style="Gray.TLabel")
+                
+                # 3. 전체 총자산 수익금 및 수익률 초기화
+                total_profit_label.config(text="총자산 수익금: 0원", style="Black.TLabel")
+                total_profit_rate_label.config(text="총자산 수익률: (0.00%)", style="Black.TLabel")
+
+                # 4. 내부 상태 저장소 초기화
+                all_ticker_total_values.clear()
+                all_ticker_start_balances.clear()
+
+            except Exception as e:
+                messagebox.showerror("오류", f"데이터 초기화 중 오류 발생: {e}")
+
+    def toggle_trading():
+        """거래 시작/중지"""
     """수익 데이터 업데이트"""
     try:
         try:
@@ -1594,6 +1631,8 @@ def start_dashboard():
 
     ttk.Button(settings_icon_frame, text="📄 엑셀 내보내기", 
                command=export_data_to_excel).pack(side='left', padx=(10, 0))
+    ttk.Button(settings_icon_frame, text="데이터 초기화", 
+               command=clear_all_data).pack(side='left', padx=(10, 0))
 
     # 중간 프레임 (차트)
     mid_frame = ttk.LabelFrame(main_frame, text="실시간 차트 및 그리드")
