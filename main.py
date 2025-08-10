@@ -85,6 +85,8 @@ default_config = {
     "max_position_size": 0.3,  # 최대 포지션 크기 (총 자산 대비)
     "emergency_exit_enabled": True,  # 긴급 청산 활성화
     "auto_grid_count": True, # 그리드 개수 자동 계산
+    "max_grid_count": 30, # 투자 성향에 따른 최대 그리드 수
+    "investment_profile": "보통", # 현재 선택된 투자 성향
     "tts_enabled": True, # TTS 음성 안내 사용
     "kakao_enabled": True, # 카카오톡 알림 사용
     "total_investment": "100000",
@@ -525,8 +527,8 @@ def calculate_optimal_grid_count(high_price, low_price, target_profit_percent_ov
     calculated_grid_count = price_range_percent / effective_min_profit_per_grid_percent
 
     # 그리드 개수는 정수여야 하며, 너무 많거나 적지 않도록 제한
-    # 최소 3개, 최대 50개 (기존 코드의 경고 메시지 참고)
-    final_grid_count = max(3, min(50, int(round(calculated_grid_count))))
+    # 최소 3개, 최대는 설정값 따름
+    final_grid_count = max(3, min(config.get('max_grid_count', 50), int(round(calculated_grid_count))))
     
     # 가격 범위가 너무 작아서 계산된 그리드 개수가 3개 미만으로 나오면,
     # 최소 3개 그리드를 유지하되, 각 그리드 간격이 수수료를 커버하는지 확인
@@ -1151,7 +1153,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         update_gui('status', "상태: 중지됨", "Orange.TLabel", False, False)
 
 # 설정 창
-def open_settings_window(root, config, callback):
+def open_settings_window(root, config, callback, grid_update_callback=None):
     """설정 창 열기"""
     settings_window = tk.Toplevel(root)
     settings_window.title("시스템 설정")
@@ -1247,6 +1249,56 @@ def open_settings_window(root, config, callback):
     # 리스크 관리 탭
     risk_frame = ttk.Frame(notebook)
     notebook.add(risk_frame, text="리스크 관리")
+
+    # 투자 성향 자동 설정
+    profile_frame = ttk.LabelFrame(risk_frame, text="투자 성향 자동 설정")
+    profile_frame.pack(fill='x', padx=5, pady=10)
+
+    profile_status_label = ttk.Label(profile_frame, text=f"현재 성향: {config.get('investment_profile', '보통')}", font=('Helvetica', 10, 'bold'))
+    profile_status_label.pack(pady=5)
+
+    button_container = ttk.Frame(profile_frame)
+    button_container.pack(fill='x', pady=5)
+
+    profiles = {
+        "안전형": {"panic": -2, "stop_loss": -5, "trailing_stop": True, "trailing_percent": 1.5, "max_grid": 50},
+        "보통": {"panic": -5, "stop_loss": -10, "trailing_stop": True, "trailing_percent": 3.0, "max_grid": 30},
+        "공격형": {"panic": -8, "stop_loss": -15, "trailing_stop": True, "trailing_percent": 5.0, "max_grid": 15},
+        "모험형": {"panic": -12, "stop_loss": -25, "trailing_stop": False, "trailing_percent": 0, "max_grid": 10}
+    }
+
+    def apply_profile(profile_name):
+        profile_settings = profiles[profile_name]
+        
+        # 설정 창의 UI 변수 업데이트
+        vars_dict['panic_threshold'].set(profile_settings["panic"])
+        vars_dict['stop_loss_threshold'].set(profile_settings["stop_loss"])
+        vars_dict['trailing_stop'].set(profile_settings["trailing_stop"])
+        vars_dict['trailing_stop_percent'].set(profile_settings["trailing_percent"])
+        vars_dict['max_grid_count'].set(profile_settings["max_grid"])
+        vars_dict['investment_profile'].set(profile_name)
+        profile_status_label.config(text=f"현재 성향: {profile_name}")
+
+        # 전역 config 객체도 즉시 업데이트
+        global config
+        config.update({
+            "panic_threshold": profile_settings["panic"],
+            "stop_loss_threshold": profile_settings["stop_loss"],
+            "trailing_stop": profile_settings["trailing_stop"],
+            "trailing_stop_percent": profile_settings["trailing_percent"],
+            "max_grid_count": profile_settings["max_grid"],
+            "investment_profile": profile_name
+        })
+
+        # 메인 창의 그리드 개수 즉시 업데이트
+        if grid_update_callback:
+            grid_update_callback(None) # event 객체로 None 전달
+        
+        messagebox.showinfo("적용 완료", f"'{profile_name}' 설정이 적용되었습니다. 변경사항을 유지하려면 '저장'을 눌러주세요.")
+
+    for i, (name, _) in enumerate(profiles.items()):
+        btn = ttk.Button(button_container, text=name, command=lambda n=name: apply_profile(n))
+        btn.pack(side='left', expand=True, fill='x', padx=2)
     
     # 급락 임계값
     ttk.Label(risk_frame, text="급락 감지 임계값 (%):", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=(10, 5))
@@ -1269,11 +1321,20 @@ def open_settings_window(root, config, callback):
     vars_dict['trailing_stop_percent'] = tk.DoubleVar(value=config.get('trailing_stop_percent', 3.0))
     trailing_percent_entry = ttk.Entry(risk_frame, textvariable=vars_dict['trailing_stop_percent'])
     trailing_percent_entry.pack(fill='x', pady=(0, 10))
+
+    # 최대 그리드 개수
+    ttk.Label(risk_frame, text="최대 그리드 개수:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=5)
+    vars_dict['max_grid_count'] = tk.IntVar(value=config.get('max_grid_count', 30))
+    max_grid_entry = ttk.Entry(risk_frame, textvariable=vars_dict['max_grid_count'])
+    max_grid_entry.pack(fill='x', pady=(0, 10))
     
     # 긴급 청산
     vars_dict['emergency_exit_enabled'] = tk.BooleanVar(value=config.get('emergency_exit_enabled', True))
     emergency_check = ttk.Checkbutton(risk_frame, text="긴급 청산 활성화", variable=vars_dict['emergency_exit_enabled'])
     emergency_check.pack(anchor='w', pady=5)
+
+    # investment_profile을 vars_dict에 추가
+    vars_dict['investment_profile'] = tk.StringVar(value=config.get('investment_profile', '보통'))
     
     # 거래 설정 탭
     trade_frame = ttk.Frame(notebook)
@@ -1694,7 +1755,7 @@ def start_dashboard():
     }
 
     ttk.Button(settings_icon_frame, text="⚙️ 시스템 설정", 
-               command=lambda: open_settings_window(root, config, update_config)).pack(side='left')
+               command=lambda: open_settings_window(root, config, update_config, update_grid_count_on_period_change)).pack(side='left')
     ttk.Button(settings_icon_frame, text="📊 백테스트", 
                command=lambda: open_backtest_window(root, main_settings)).pack(side='left', padx=(10, 0))
     def export_data_to_excel():
