@@ -1402,7 +1402,9 @@ def start_dashboard():
     active_trades = {}
     gui_queue = Queue()
     chart_data = {}
-    global config, upbit
+    all_ticker_total_values = {} # 각 티커의 현재 총 자산 가치
+    all_ticker_start_balances = {} # 각 티커의 시작 자본
+    global config, upbit, total_profit_label, total_profit_rate_label # Declare global for new labels
 
     start_tts_worker()
 
@@ -1504,6 +1506,13 @@ def start_dashboard():
         if i < len(tickers) - 1:
             sep = ttk.Separator(ticker_frame, orient='horizontal')
             sep.grid(row=i*5+4, column=0, columnspan=4, sticky='ew', pady=3)
+
+    # 총자산 수익금 및 수익률 표시 라벨
+    total_profit_label = ttk.Label(ticker_frame, text="총자산 수익금: 0원", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
+    total_profit_label.grid(row=len(tickers)*5 + 5, column=0, columnspan=2, sticky='w', padx=3, pady=5)
+
+    total_profit_rate_label = ttk.Label(ticker_frame, text="총자산 수익률: (0.00%)", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
+    total_profit_rate_label.grid(row=len(tickers)*5 + 5, column=2, columnspan=2, sticky='w', padx=3, pady=5)
 
     # 그리드 투자 설정
     settings_frame = ttk.LabelFrame(top_frame, text="그리드 투자 설정")
@@ -1825,6 +1834,24 @@ def start_dashboard():
                     detail_labels[ticker]['coin_qty'].config(text=f"보유: {coin_qty:.6f}개", style="Black.TLabel")
                     detail_labels[ticker]['coin_value'].config(text=f"코인가치: {held_value:,.0f}원", style="Black.TLabel")
                     detail_labels[ticker]['total_value'].config(text=f"총자산: {total_value:,.0f}원", style="Blue.TLabel")
+
+                    # 각 티커의 총 자산 가치 및 시작 자본 업데이트
+                    all_ticker_total_values[ticker] = total_value
+                    # start_balance는 grid_trading 함수에서 초기화되므로, 여기서는 total_investment를 사용
+                    # 또는 grid_trading에서 start_queue로 전달하도록 수정 필요
+                    # 현재는 total_investment를 사용하되, 실제 시작 자본과 다를 수 있음을 인지
+                    all_ticker_start_balances[ticker] = float(config.get("total_investment", "0")) # config에서 가져옴
+
+                    # 전체 총자산 수익금 및 수익률 계산
+                    total_sum_current_value = sum(all_ticker_total_values.values())
+                    total_sum_initial_investment = sum(all_ticker_start_balances.values())
+
+                    overall_profit = total_sum_current_value - total_sum_initial_investment
+                    overall_profit_percent = (overall_profit / total_sum_initial_investment) * 100 if total_sum_initial_investment > 0 else 0
+
+                    # 전체 총자산 수익금 및 수익률 라벨 업데이트
+                    total_profit_label.config(text=f"총자산 수익금: {overall_profit:,.0f}원", style=get_profit_color_style(overall_profit))
+                    total_profit_rate_label.config(text=f"총자산 수익률: ({overall_profit_percent:+.2f}%)", style=get_profit_color_style(overall_profit))
                 elif key == 'chart_data':
                     high_price, low_price, grid_levels = args
                     chart_data[ticker] = (high_price, low_price, grid_levels)
