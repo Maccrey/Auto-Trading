@@ -638,12 +638,29 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     fee_rate = 0.0005
     previous_prices = []  # 급락 감지용 이전 가격들
     panic_mode = False
-    highest_value = total_investment  # 트레일링 스탑용 최고 자산 가치
+
+    # Calculate current total assets and cash balance on startup
+    current_price_for_calc = pyupbit.get_current_price(ticker)
+    if current_price_for_calc is None:
+        log_trade(ticker, '오류', '현재 가격 조회 실패', lambda log: update_gui('log', log))
+        update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
+        return
+
+    demo_positions = load_trading_state(ticker, True) # Load positions first
+
+    current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
+    invested_in_held_positions = sum(pos['quantity'] * pos['buy_price'] for pos in demo_positions)
+    
+    # Ensure total_investment is treated as the initial capital
+    initial_capital = float(total_investment) 
+    current_cash_balance = initial_capital - invested_in_held_positions
+    current_total_assets = current_cash_balance + current_held_assets_value
+
+    highest_value = current_total_assets  # 트레일링 스탑용 최고 자산 가치
     
     if demo_mode:
-        start_balance = total_investment
-        demo_balance = total_investment
-        demo_positions = load_trading_state(ticker, True)
+        start_balance = current_total_assets
+        demo_balance = current_total_assets
         if demo_positions:
             log_trade(ticker, '정보', f'{len(demo_positions)}개의 포지션을 복원했습니다.', lambda log: update_gui('log', log))
         total_invested = 0
