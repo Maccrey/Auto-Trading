@@ -871,7 +871,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             'quantity': quantity,
                             'target_sell_price': target_sell_price,
                             'actual_buy_price': price,
-                            'highest_price': price  # 트레일링 스탑용
+                            'highest_price': price,  # 트레일링 스탑용
+                            'sell_held': False, # 매도 보류 상태
+                            'highest_grid_reached': -1 # 보류 중 도달한 최고 그리드 인덱스
                         })
                         save_trading_state(ticker, demo_positions, True)
                         
@@ -905,37 +907,25 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                         update_gui('refresh_chart')
             
-            # 데모 모드 매도 로직 (트레일링 스탑 포함)
+            # 데모 모드 매도 로직 (상승 추세 추종 및 트레일링 스탑 포함)
             for position in demo_positions[:]:
-                # 최고가 업데이트
+                # 최고가 업데이트 (트레일링 스탑용)
                 if price > position['highest_price']:
                     position['highest_price'] = price
-                
-                sell_condition = False
-                sell_reason = ""
-                
-                # 목표가 도달
-                if price >= position['target_sell_price']:
-                    sell_condition = True
-                    sell_reason = "목표달성"
-                
-                # 트레일링 스탑
-                elif config.get("trailing_stop", True):
+
+                # 안전장치: 손절 및 포트폴리오 트레일링 스탑은 항상 체크
+                stop_loss_triggered = price <= position['actual_buy_price'] * (1 + config.get("stop_loss_threshold", -10.0) / 100)
+                trailing_stop_triggered = False
+                if config.get("trailing_stop", True):
                     trailing_percent = config.get("trailing_stop_percent", 3.0) / 100
                     if price <= position['highest_price'] * (1 - trailing_percent):
-                        sell_condition = True
-                        sell_reason = "트레일링스탑"
-                
-                # 손절
-                elif price <= position['actual_buy_price'] * (1 + config.get("stop_loss_threshold", -10.0) / 100):
-                    sell_condition = True
-                    sell_reason = "손절"
-                
-                if sell_condition:
+                        trailing_stop_triggered = True
+
+                if stop_loss_triggered or trailing_stop_triggered:
+                    sell_reason = "손절" if stop_loss_triggered else "트레일링스탑"
+                    # 즉시 매도 실행
                     sell_amount = position['quantity'] * price
-                    sell_fee = sell_amount * fee_rate
-                    net_sell_amount = sell_amount - sell_fee
-                    
+                    net_sell_amount = sell_amount * (1 - fee_rate)
                     demo_balance += net_sell_amount
                     demo_positions.remove(position)
                     save_trading_state(ticker, demo_positions, True)
@@ -946,18 +936,59 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                     log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
                     log_trade(ticker, "데모 매도", log_msg, lambda log: update_gui('log', log))
-
-                    # TTS 음성 안내
-                    if config.get('tts_enabled', True):
-                        tts_msg = f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다."
-                        speak_async(tts_msg)
-
-                    # 카카오톡 알림
-                    if config.get('kakao_enabled', True):
-                        kakao_msg = f"[데모 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})"
-                        send_kakao_message(kakao_msg)
-
+                    speak_async(f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다.")
+                    send_kakao_message(f"[데모 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     update_gui('refresh_chart')
+                    continue # 다음 포지션으로
+
+                # 상승 추세 추종 매도 로직
+                if position.get('sell_held', False):
+                    # 매도 보류 상태일 때
+                    current_highest_grid = position['highest_grid_reached']
+                    
+                    # 가격이 다음 그리드 이상으로 상승했는지 체크
+                    if current_highest_grid < len(grid_levels) - 1 and price >= grid_levels[current_highest_grid + 1]:
+                        position['highest_grid_reached'] += 1
+                        new_target_price = grid_levels[position['highest_grid_reached']]
+                        position['target_sell_price'] = new_target_price
+                        log_msg = f"매도 보류 및 목표 상향: {new_target_price:,.0f}원"
+                        log_trade(ticker, "데모 매도보류", log_msg, lambda log: update_gui('log', log))
+                        speak_async(f"{ticker.replace('KRW-','')}" + " 목표 상향")
+
+                    # 가격이 최고 그리드 아래로 하락했는지 체크 (매도 실행)
+                    elif price <= grid_levels[current_highest_grid]:
+                        sell_price = grid_levels[current_highest_grid] # 하락한 그리드 가격으로 매도
+                        sell_amount = position['quantity'] * sell_price
+                        net_sell_amount = sell_amount * (1 - fee_rate)
+                        
+                        demo_balance += net_sell_amount
+                        demo_positions.remove(position)
+                        save_trading_state(ticker, demo_positions, True)
+                        
+                        buy_cost = position['quantity'] * position['actual_buy_price']
+                        net_profit = net_sell_amount - buy_cost
+                        total_realized_profit += net_profit
+
+                        log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
+                        log_trade(ticker, "데모 매도", log_msg, lambda log: update_gui('log', log))
+                        speak_async(f"데모 모드, {ticker.replace('KRW-','')}" + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
+                        send_kakao_message(f"[데모 최종매도] {ticker.replace('KRW-','')} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원")
+                        update_gui('refresh_chart')
+
+                else:
+                    # 매도 보류 상태가 아닐 때: 최초 목표가 도달 체크
+                    if price >= position['target_sell_price']:
+                        position['sell_held'] = True
+                        # 현재 그리드 레벨 찾기
+                        for i, level in enumerate(grid_levels):
+                            if position['target_sell_price'] == level:
+                                position['highest_grid_reached'] = i
+                                break
+                        
+                        if position['highest_grid_reached'] != -1:
+                            log_msg = f"목표가 {position['target_sell_price']:,.0f}원 도달. 매도 보류 시작."
+                            log_trade(ticker, "데모 매도보류", log_msg, lambda log: update_gui('log', log))
+                            speak_async(f"{ticker.replace('KRW-','')}" + " 매도 보류 시작")
             
             # 긴급 청산 체크
             held_value = sum(pos['quantity'] * price for pos in demo_positions)
@@ -1022,7 +1053,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                         'target_sell_price': target_sell_price,
                                         'actual_buy_price': price,
                                         'fee': paid_fee,
-                                        'highest_price': price
+                                        'highest_price': price,
+                                        'sell_held': False, # 매도 보류 상태
+                                        'highest_grid_reached': -1 # 보류 중 도달한 최고 그리드 인덱스
                                     })
                                     save_trading_state(ticker, real_positions, False)
                                     total_invested += actual_buy_amount
@@ -1055,47 +1088,72 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         else:
                             log_trade(ticker, '오류', '매수 주문 실패', lambda log: update_gui('log', log))
             
-            # 실제 거래 모드 매도 로직
+            # 실제 거래 모드 매도 로직 (상승 추세 추종 적용)
             for position in real_positions[:]:
                 if price > position['highest_price']:
                     position['highest_price'] = price
-                
-                sell_condition = False
-                sell_reason = ""
-                
-                if price >= position['target_sell_price']:
-                    sell_condition = True
-                    sell_reason = "목표달성"
-                elif config.get("trailing_stop", True):
+
+                # 안전장치: 손절 및 트레일링 스탑
+                stop_loss_triggered = price <= position['actual_buy_price'] * (1 + config.get("stop_loss_threshold", -10.0) / 100)
+                trailing_stop_triggered = False
+                if config.get("trailing_stop", True):
                     trailing_percent = config.get("trailing_stop_percent", 3.0) / 100
                     if price <= position['highest_price'] * (1 - trailing_percent):
-                        sell_condition = True
-                        sell_reason = "트레일링스탑"
-                elif price <= position['actual_buy_price'] * (1 + config.get("stop_loss_threshold", -10.0) / 100):
-                    sell_condition = True
-                    sell_reason = "손절"
-                
-                if sell_condition:
+                        trailing_stop_triggered = True
+
+                if stop_loss_triggered or trailing_stop_triggered:
+                    sell_reason = "손절" if stop_loss_triggered else "트레일링스탑"
                     res = execute_sell_order(ticker, position['quantity'], price, config.get("use_limit_orders", True))
                     if res and 'uuid' in res:
                         real_positions.remove(position)
                         save_trading_state(ticker, real_positions, False)
                         log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개)"
                         log_trade(ticker, "실제 매도", log_msg, lambda log: update_gui('log', log))
-
-                        # TTS 음성 안내
-                        if config.get('tts_enabled', True):
-                            tts_msg = f"{sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다."
-                            speak_async(tts_msg)
-
-                        # 카카오톡 알림
-                        if config.get('kakao_enabled', True):
-                            kakao_msg = f"[실제 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 매도 ({sell_reason})"
-                            send_kakao_message(kakao_msg)
-
+                        speak_async(f"{sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다.")
+                        send_kakao_message(f"[실제 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 매도 ({sell_reason})")
                         update_gui('refresh_chart')
                     else:
-                        log_trade(ticker, '오류', '매도 주문 실패', lambda log: update_gui('log', log))
+                        log_trade(ticker, '오류', f'{sell_reason} 매도 주문 실패', lambda log: update_gui('log', log))
+                    continue
+
+                # 상승 추세 추종 매도 로직
+                if position.get('sell_held', False):
+                    current_highest_grid = position['highest_grid_reached']
+                    
+                    if current_highest_grid < len(grid_levels) - 1 and price >= grid_levels[current_highest_grid + 1]:
+                        position['highest_grid_reached'] += 1
+                        new_target_price = grid_levels[position['highest_grid_reached']]
+                        position['target_sell_price'] = new_target_price
+                        log_msg = f"매도 보류 및 목표 상향: {new_target_price:,.0f}원"
+                        log_trade(ticker, "실제 매도보류", log_msg, lambda log: update_gui('log', log))
+                        speak_async(f"{ticker.replace('KRW-','')}" + " 실제 거래 목표 상향")
+                    
+                    elif price <= grid_levels[current_highest_grid]:
+                        sell_price = grid_levels[current_highest_grid]
+                        res = execute_sell_order(ticker, position['quantity'], sell_price, config.get("use_limit_orders", True))
+                        if res and 'uuid' in res:
+                            real_positions.remove(position)
+                            save_trading_state(ticker, real_positions, False)
+                            log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개)"
+                            log_trade(ticker, "실제 매도", log_msg, lambda log: update_gui('log', log))
+                            speak_async(f"실제 거래, {ticker.replace('KRW-','')}" + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
+                            send_kakao_message(f"[실제 최종매도] {ticker.replace('KRW-','')} {sell_price:,.0f}원 ({position['quantity']:.6f}개)")
+                            update_gui('refresh_chart')
+                        else:
+                            log_trade(ticker, '오류', '상승추세 종료 매도 주문 실패', lambda log: update_gui('log', log))
+
+                else:
+                    if price >= position['target_sell_price']:
+                        position['sell_held'] = True
+                        for i, level in enumerate(grid_levels):
+                            if position['target_sell_price'] == level:
+                                position['highest_grid_reached'] = i
+                                break
+                        
+                        if position['highest_grid_reached'] != -1:
+                            log_msg = f"목표가 {position['target_sell_price']:,.0f}원 도달. 실제 매도 보류 시작."
+                            log_trade(ticker, "실제 매도보류", log_msg, lambda log: update_gui('log', log))
+                            speak_async(f"{ticker.replace('KRW-','')}" + " 실제 매도 보류 시작")
             
             # 실제 잔액 기반 수익 계산
             current_balance = upbit.get_balance("KRW")
