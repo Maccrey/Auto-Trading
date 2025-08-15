@@ -173,7 +173,7 @@ def update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_
         json.dump(profits_data, f)
 
     total_profit_percent = sum(profits_data.values())
-    total_profit_label.config(text=f"Total Profit: {total_profit_percent:.2f}%")
+    total_profit_label.config(text=f"총 실현수익: {total_profit_percent:.2f}%")
 
     # Calculate total profit rate based on all_ticker_total_values and all_ticker_start_balances
     total_current_value = sum(all_ticker_total_values.values())
@@ -181,13 +181,16 @@ def update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_
 
     if total_start_balance > 0:
         overall_profit_rate = ((total_current_value - total_start_balance) / total_start_balance) * 100
-        total_profit_rate_label.config(text=f"Overall Profit Rate: {overall_profit_rate:.2f}%")
+        total_profit_rate_label.config(text=f"총 실현수익률: {overall_profit_rate:.2f}%")
     else:
         total_profit_rate_label.config(text="Overall Profit Rate: N/A")
 
 # 카카오톡 알림 API
 def send_kakao_message(message):
     """카카오톡 메시지 전송"""
+    if not config.get("kakao_enabled", True):
+        return
+
     if not config["kakao_token"]:
         print("카카오톡 토큰이 설정되지 않았습니다.")
         return
@@ -203,6 +206,9 @@ def send_kakao_message(message):
         response = requests.post(url, headers=headers, data=data, timeout=10)
         if response.status_code != 200:
             print(f"카카오톡 전송 실패: {response.text}")
+            if response.status_code == 401:
+                print("\n[알림] 카카오톡 액세스 토큰이 만료되었거나 유효하지 않습니다.")
+                print("프로그램의 [시스템 설정 > 알림 설정]에서 토큰을 갱신해주세요.\n")
     except requests.exceptions.RequestException as e:
         print(f"카카오톡 전송 중 오류 발생: {e}")
 
@@ -1580,6 +1586,16 @@ def start_dashboard():
     profits_data = load_profits_data() # 수익 데이터 로드
     global config, upbit, total_profit_label, total_profit_rate_label # Declare global for new labels
 
+    def add_log_to_gui(log_entry):
+        """GUI 로그 트리에 새 로그 항목 추가"""
+        ticker = log_entry.get('ticker', 'SYSTEM')
+        action = log_entry.get('action', '')
+        price_info = log_entry.get('price', '')
+        log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        
+        log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
+        log_tree.yview_moveto(1) # 항상 최신 로그가 보이도록 스크롤
+
     start_tts_worker()
 
     root = tk.Tk()
@@ -1734,18 +1750,39 @@ def start_dashboard():
             messagebox.showwarning("경고", "거래할 코인을 선택해주세요.")
             return
 
+        print("--- Entering toggle_trading_logic ---")
         try:
             total_investment = float(amount_entry.get())
             grid_count = int(grid_entry.get())
+            
             target_profit_percent_str = target_entry.get()
+            print(f"target_profit_percent_str: {target_profit_percent_str!r}")
+
+            if target_profit_percent_str and target_profit_percent_str.strip():
+                try:
+                    target_profit = float(target_profit_percent_str)
+                    print(f"target_profit (converted): {target_profit}")
+                except (ValueError, TypeError) as e:
+                    print(f"Error converting target_profit_percent_str: {e}")
+                    messagebox.showerror("오류", "목표 수익률은 숫자여야 합니다.")
+                    return
+            else:
+                target_profit = float('inf') # 미지정이면 무한으로 처리
+                print(f"target_profit (unspecified): {target_profit}")
+
             period = period_combo.get()
             demo_mode = demo_var.get()
-        except ValueError:
+            print(f"total_investment: {total_investment}, grid_count: {grid_count}, period: {period}, demo_mode: {demo_mode}")
+
+        except ValueError as e:
+            print(f"Error in initial input conversion: {e}")
             messagebox.showerror("오류", "투자 금액과 그리드 개수는 숫자여야 합니다.")
             return
 
+        print("--- Input conversion successful, proceeding to start/stop threads ---")
         for ticker in selected_tickers:
             if ticker not in active_trades:
+                print(f"Starting trade for {ticker}")
                 stop_event = threading.Event()
                 active_trades[ticker] = stop_event
                 
@@ -1761,45 +1798,24 @@ def start_dashboard():
                 )
                 trade_thread.start()
                 status_labels[ticker].config(text="상태: 시작중...", style="Blue.TLabel")
-                toggle_button.config(text="거래 정지")
             else:
+                print(f"Stopping trade for {ticker}")
                 stop_event = active_trades.pop(ticker)
                 stop_event.set()
                 status_labels[ticker].config(text="상태: 중지됨", style="Orange.TLabel")
-                if not active_trades:
-                    toggle_button.config(text="거래 시작")
+
+        if active_trades:
+            toggle_button.config(text="거래 정지")
+            print(f"Button text changed to '거래 정지'")
+        else:
+            toggle_button.config(text="거래 시작")
+            print(f"Button text changed to '거래 시작'")
+            
+        print("--- Exiting toggle_trading_logic ---")
 
     toggle_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading_logic)
     toggle_button.grid(row=7, column=0, columnspan=2, pady=10)
 
-    def update_grid_count_on_period_change(event):
-        if auto_grid_var.get():
-            try:
-                selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
-                if not selected_tickers:
-                    representative_ticker = "KRW-BTC"
-                else:
-                    representative_ticker = selected_tickers[0]
-
-                period = period_combo.get()
-                high_price, low_price = calculate_price_range(representative_ticker, period)
-                
-                target_profit_str = target_entry.get()
-                if target_profit_str and target_profit_str.strip():
-                    target_profit = float(target_profit_str)
-                else:
-                    target_profit = float('inf') # 미지정이면 무한으로 처리
-
-                if high_price and low_price:
-                    new_grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit, 0.0005)
-                    grid_entry.delete(0, tk.END)
-                    grid_entry.insert(0, str(new_grid_count))
-                    log_trade(representative_ticker, '정보', f'{period} 기준, 자동 계산된 그리드: {new_grid_count}개', add_log_to_gui)
-                else:
-                    log_trade(representative_ticker, '오류', f'{period} 기준 가격 범위 계산 실패', add_log_to_gui)
-            except Exception as e:
-                print(f"그리드 자동 계산 오류: {e}")
-    
     def update_grid_count_on_period_change(event):
         if auto_grid_var.get():
             try:
@@ -1924,6 +1940,16 @@ def start_dashboard():
                     canvas.draw_idle()
 
     canvas.mpl_connect("motion_notify_event", on_hover)
+
+    def add_log_to_gui(log_entry):
+        """GUI 로그 트리에 새 로그 항목 추가"""
+        ticker = log_entry.get('ticker', 'SYSTEM')
+        action = log_entry.get('action', '')
+        price_info = log_entry.get('price', '')
+        log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        
+        log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
+        log_tree.yview_moveto(1) # 항상 최신 로그가 보이도록 스크롤
 
     def update_chart(ticker, period):
         """차트 업데이트"""
