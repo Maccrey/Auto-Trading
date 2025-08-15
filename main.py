@@ -862,7 +862,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 
                 else:
                     # 가격이 반등하여 최저 그리드를 '확실히' 돌파했는지 체크 (매수 실행)
-                    confirmation_buffer = 0.0005 # 0.05% 버퍼
+                    confirmation_buffer = 0.001 # 0.1% 버퍼
                     buy_confirmation_price = grid_levels[lowest_grid_to_buy] * (1 + confirmation_buffer)
                     if price >= buy_confirmation_price:
                         buy_price = grid_levels[lowest_grid_to_buy]
@@ -962,7 +962,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                     else:
                         # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행)
-                        confirmation_buffer = 0.0005 # 0.05% 버퍼
+                        confirmation_buffer = 0.001 # 0.1% 버퍼
                         sell_confirmation_price = grid_levels[current_highest_grid] * (1 - confirmation_buffer)
                         if price <= sell_confirmation_price:
                             sell_price = grid_levels[current_highest_grid] # 하락한 그리드 가격으로 매도
@@ -1031,6 +1031,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             coin_quantity = sum(pos['quantity'] for pos in demo_positions)
             
             update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent)
+
+            # 차트 상태 업데이트
+            positions = demo_positions
+            pending_buy_info = {'is_pending': buy_pending, 'grid_index': lowest_grid_to_buy}
+            update_gui('chart_state', positions, pending_buy_info)
             
         else:
             # 실제 거래 모드 매수 로직 (하락 추세 추종)
@@ -1044,7 +1049,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                 else:
                     # 가격이 반등하여 최저 그리드를 '확실히' 돌파했는지 체크 (매수 실행)
-                    confirmation_buffer = 0.0005 # 0.05% 버퍼
+                    confirmation_buffer = 0.001 # 0.1% 버퍼
                     buy_confirmation_price = grid_levels[lowest_grid_to_buy] * (1 + confirmation_buffer)
                     if price >= buy_confirmation_price:
                         buy_price = grid_levels[lowest_grid_to_buy]
@@ -1142,7 +1147,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     
                     else:
                         # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행)
-                        confirmation_buffer = 0.0005 # 0.05% 버퍼
+                        confirmation_buffer = 0.001 # 0.1% 버퍼
                         sell_confirmation_price = grid_levels[current_highest_grid] * (1 - confirmation_buffer)
                         if price <= sell_confirmation_price:
                             sell_price = grid_levels[current_highest_grid]
@@ -1194,6 +1199,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         break
 
                 update_gui('details', current_balance, coin_balance, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent)
+
+                # 차트 상태 업데이트
+                positions = real_positions
+                pending_buy_info = {'is_pending': buy_pending, 'grid_index': lowest_grid_to_buy}
+                update_gui('chart_state', positions, pending_buy_info)
 
         update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data)
         
@@ -1336,10 +1346,10 @@ def open_settings_window(root, config, callback, grid_update_callback=None):
     button_container.pack(fill='x', pady=5)
 
     profiles = {
-        "안전형": {"panic": -2, "stop_loss": -5, "trailing_stop": True, "trailing_percent": 1.5, "max_grid": 50},
-        "보통": {"panic": -5, "stop_loss": -10, "trailing_stop": True, "trailing_percent": 3.0, "max_grid": 30},
-        "공격형": {"panic": -8, "stop_loss": -15, "trailing_stop": True, "trailing_percent": 5.0, "max_grid": 15},
-        "모험형": {"panic": -12, "stop_loss": -25, "trailing_stop": False, "trailing_percent": 0, "max_grid": 10}
+        "안전형": {"panic": -2, "stop_loss": -5, "trailing_stop": True, "trailing_percent": 1.5, "max_grid": 30},
+        "보통": {"panic": -5, "stop_loss": -10, "trailing_stop": True, "trailing_percent": 3.0, "max_grid": 25},
+        "공격형": {"panic": -8, "stop_loss": -15, "trailing_stop": True, "trailing_percent": 5.0, "max_grid": 10},
+        "모험형": {"panic": -12, "stop_loss": -25, "trailing_stop": False, "trailing_percent": 0, "max_grid": 5}
     }
 
     def apply_profile(profile_name):
