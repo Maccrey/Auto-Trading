@@ -275,12 +275,11 @@ def export_to_excel(filename=None):
                 profits = json.load(f)
             
             row = 1
-            for ticker, ticker_profits in profits.items():
-                for profit_entry in ticker_profits:
-                    profit_sheet.write(row, 0, profit_entry.get('time', ''))
-                    profit_sheet.write(row, 1, ticker)
-                    profit_sheet.write(row, 2, profit_entry.get('profit', 0))
-                    row += 1
+            for ticker, profit in profits.items():
+                profit_sheet.write(row, 0, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                profit_sheet.write(row, 1, ticker)
+                profit_sheet.write(row, 2, profit)
+                row += 1
         except (FileNotFoundError, json.JSONDecodeError):
             pass
         
