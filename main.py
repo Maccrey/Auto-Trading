@@ -648,6 +648,22 @@ def run_backtest(ticker, total_investment, grid_count, period, stop_loss_thresho
 
 
 
+def has_trade_logs(ticker):
+    """지정된 티커에 대한 거래 로그가 있는지 확인"""
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            logs = json.load(f)
+        if ticker not in logs:
+            return False
+        # Check for actual buy/sell logs, not just informational ones
+        for log in logs[ticker]:
+            action = log.get('action', '')
+            if '매수' in action or '매도' in action:
+                return True
+        return False
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+
 # 개선된 그리드 트레이딩 로직
 def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent_str, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
