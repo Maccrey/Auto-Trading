@@ -447,6 +447,10 @@ trade_counts = {
     "KRW-XRP": {"buy": 0, "sell": 0, "profitable_sell": 0}
 }
 
+# 실시간 로그 팝업 관련 전역 변수
+current_log_popup = None
+current_log_tree = None
+
 def initialize_upbit():
     """업비트 API 초기화"""
     global upbit
@@ -2222,6 +2226,14 @@ def start_dashboard():
 
     def show_trading_log_popup():
         """실시간 거래 로그 팝업창 표시"""
+        global current_log_popup, current_log_tree
+        
+        # 이미 팝업이 열려있다면 포커스만 이동
+        if current_log_popup and current_log_popup.winfo_exists():
+            current_log_popup.lift()
+            current_log_popup.focus_set()
+            return
+        
         popup = tk.Toplevel(root)
         popup.title("실시간 거래 로그")
         popup.geometry("800x500")
@@ -2230,6 +2242,8 @@ def start_dashboard():
         # 팝업 창을 부모 창 중앙에 위치
         popup.transient(root)
         popup.grab_set()
+        
+        current_log_popup = popup
         
         # 로그 트리뷰 생성
         log_tree_popup = ttk.Treeview(popup, columns=("시간", "코인", "종류", "가격"), show='headings')
@@ -2252,7 +2266,20 @@ def start_dashboard():
         try:
             with open(log_file, 'r', encoding='utf-8') as f:
                 logs = json.load(f)
-                for log_entry in logs:
+                all_logs = []
+                
+                # 티커별 로그를 모두 수집
+                for ticker, ticker_logs in logs.items():
+                    for log_entry in ticker_logs:
+                        full_log = log_entry.copy()
+                        full_log['ticker'] = ticker
+                        all_logs.append(full_log)
+                
+                # 시간순으로 정렬
+                all_logs.sort(key=lambda x: x.get('time', ''))
+                
+                # 트리뷰에 추가
+                for log_entry in all_logs:
                     ticker = log_entry.get('ticker', 'SYSTEM')
                     action = log_entry.get('action', '')
                     price_info = log_entry.get('price', '')
@@ -2260,25 +2287,54 @@ def start_dashboard():
                     log_tree_popup.insert('', 'end', values=(log_time, ticker, action, price_info))
                     
                 # 최신 로그가 보이도록 스크롤
-                if logs:
+                if all_logs:
                     log_tree_popup.yview_moveto(1)
         except (FileNotFoundError, json.JSONDecodeError):
             # 로그 파일이 없거나 손상된 경우 빈 상태로 시작
             pass
         
+        current_log_tree = log_tree_popup
+        
+        def on_popup_close():
+            global current_log_popup, current_log_tree
+            current_log_popup = None
+            current_log_tree = None
+            popup.destroy()
+        
+        # 닫기 이벤트 바인딩
+        popup.protocol("WM_DELETE_WINDOW", on_popup_close)
+        
         # 닫기 버튼 프레임
         button_frame = ttk.Frame(popup)
         button_frame.pack(fill='x', padx=10, pady=5)
         
-        ttk.Button(button_frame, text="닫기", command=popup.destroy).pack(side='right')
+        ttk.Button(button_frame, text="닫기", command=on_popup_close).pack(side='right')
         
         return log_tree_popup
 
     def add_log_to_gui(log_entry):
-        """로그 파일에 저장 (GUI 표시는 팝업에서 처리)"""
-        # 로그는 파일에만 저장하고, 팝업에서 필요할 때 로드
-        # 이 함수는 기존 코드 호환성을 위해 유지하되, 실제 GUI 업데이트는 하지 않음
-        pass
+        """실시간 로그 팝업 업데이트"""
+        global current_log_tree, current_log_popup
+        
+        # 팝업이 열려있고 유효할 때만 실시간 업데이트
+        if (current_log_popup and current_log_tree and 
+            hasattr(current_log_popup, 'winfo_exists') and 
+            current_log_popup.winfo_exists()):
+            
+            try:
+                ticker = log_entry.get('ticker', 'SYSTEM')
+                action = log_entry.get('action', '')
+                price_info = log_entry.get('price', '')
+                log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                
+                # 새 로그를 트리뷰에 추가
+                current_log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
+                
+                # 최신 로그가 보이도록 스크롤
+                current_log_tree.yview_moveto(1)
+                
+            except Exception as e:
+                print(f"로그 팝업 업데이트 오류: {e}")
 
     def load_previous_trading_state():
         """이전 거래 상태를 로드하여 이어서 거래할 수 있도록 함"""
