@@ -46,6 +46,15 @@ def tts_worker():
         except Exception as e:
             print(f"TTS 작업자 오류: {e}")
 
+def get_korean_coin_name(ticker):
+    """코인 티커를 한국어 이름으로 변환"""
+    coin_names = {
+        'KRW-BTC': '비트코인',
+        'KRW-ETH': '이더리움',
+        'KRW-XRP': '리플'
+    }
+    return coin_names.get(ticker, ticker.replace('KRW-', ''))
+
 def speak_async(text):
     """TTS 큐에 메시지를 추가 (논블로킹)"""
     if tts_engine and config.get('tts_enabled', True):
@@ -431,6 +440,13 @@ def save_config(config):
 
 upbit = None
 
+# 매수/매도 개수 추적
+trade_counts = {
+    "KRW-BTC": {"buy": 0, "sell": 0},
+    "KRW-ETH": {"buy": 0, "sell": 0}, 
+    "KRW-XRP": {"buy": 0, "sell": 0}
+}
+
 def initialize_upbit():
     """업비트 API 초기화"""
     global upbit
@@ -637,11 +653,12 @@ def calculate_dynamic_grid(base_low, base_high, current_price, panic_mode=False)
 # 개선된 주문 실행 함수
 def execute_buy_order(ticker, amount, current_price, use_limit=True):
     """개선된 매수 주문 실행"""
-    global upbit
+    global upbit, trade_counts
     if upbit is None:
         return None
     
     try:
+        result = None
         if use_limit and config.get("use_limit_orders", True):
             # 지정가 주문 (현재가보다 약간 높게)
             buffer = config.get("limit_order_buffer", 0.2) / 100
@@ -650,10 +667,16 @@ def execute_buy_order(ticker, amount, current_price, use_limit=True):
             limit_price = round(limit_price)
             
             quantity = amount / limit_price
-            return upbit.buy_limit_order(ticker, limit_price, quantity)
+            result = upbit.buy_limit_order(ticker, limit_price, quantity)
         else:
             # 시장가 주문
-            return upbit.buy_market_order(ticker, amount)
+            result = upbit.buy_market_order(ticker, amount)
+        
+        # 주문 성공시 매수 개수 증가
+        if result and result.get('uuid'):
+            trade_counts[ticker]["buy"] += 1
+            
+        return result
     except requests.exceptions.RequestException as e:
         print(f"매수 주문 네트워크 오류: {e}")
         return None
@@ -663,21 +686,28 @@ def execute_buy_order(ticker, amount, current_price, use_limit=True):
 
 def execute_sell_order(ticker, quantity, current_price, use_limit=True):
     """개선된 매도 주문 실행"""
-    global upbit
+    global upbit, trade_counts
     if upbit is None:
         return None
     
     try:
+        result = None
         if use_limit and config.get("use_limit_orders", True):
             # 지정가 주문 (현재가보다 약간 낮게)
             buffer = config.get("limit_order_buffer", 0.2) / 100
             limit_price = current_price * (1 - buffer)
             limit_price = round(limit_price)
             
-            return upbit.sell_limit_order(ticker, limit_price, quantity)
+            result = upbit.sell_limit_order(ticker, limit_price, quantity)
         else:
             # 시장가 주문
-            return upbit.sell_market_order(ticker, quantity)
+            result = upbit.sell_market_order(ticker, quantity)
+            
+        # 주문 성공시 매도 개수 증가
+        if result and result.get('uuid'):
+            trade_counts[ticker]["sell"] += 1
+            
+        return result
     except requests.exceptions.RequestException as e:
         print(f"매도 주문 네트워크 오류: {e}")
         return None
@@ -1026,6 +1056,35 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             full_log = log_entry.copy()
             full_log['ticker'] = ticker
             update_gui('log', full_log)
+    
+    def check_api_data_validity(current_price, orderbook=None):
+        """API 데이터 유효성 검사 (그리드 거래용)"""
+        try:
+            # 기본 가격 유효성 검사
+            if current_price is None or current_price <= 0:
+                return False, "현재가 데이터 오류"
+            
+            # 오더북 데이터가 있는 경우 추가 검사
+            if orderbook:
+                if not orderbook.get('orderbook_units') or len(orderbook['orderbook_units']) == 0:
+                    return False, "오더북 데이터 없음"
+                
+                # 매수/매도 호가 존재 여부 확인
+                first_unit = orderbook['orderbook_units'][0]
+                if not first_unit.get('bid_price') or not first_unit.get('ask_price'):
+                    return False, "매수/매도 호가 데이터 오류"
+                
+                # 스프레드 이상치 검사 (현재가 대비 5% 이상 차이나면 오류로 간주)
+                bid_price = first_unit['bid_price']
+                ask_price = first_unit['ask_price']
+                spread_ratio = (ask_price - bid_price) / current_price
+                if spread_ratio > 0.05:  # 5% 이상 스프레드는 비정상
+                    return False, f"비정상적인 스프레드: {spread_ratio:.2%}"
+            
+            return True, "정상"
+            
+        except Exception as e:
+            return False, f"데이터 검증 오류: {str(e)}"
 
     # 향상된 가격 범위 계산 (사용자 지정 범위 고려)
     use_custom_range = config.get('use_custom_range', False)
@@ -1045,6 +1104,21 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     if current_price is None:
         log_and_update('오류', '시작 가격 조회 실패')
         update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
+        update_gui('action_status', 'error')
+        return
+    
+    # API 데이터 유효성 초기 검사
+    orderbook = None
+    try:
+        orderbook = pyupbit.get_orderbook(ticker)
+    except:
+        pass
+    
+    is_valid, error_msg = check_api_data_validity(current_price, orderbook)
+    if not is_valid:
+        log_and_update('오류', f'API 데이터 오류: {error_msg}')
+        update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
+        update_gui('action_status', 'error')
         return
 
     # 자동 거래 모드에서 리스크 설정 적용
@@ -1171,14 +1245,32 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         try:
             price = pyupbit.get_current_price(ticker)
             if price is None: # None을 반환하는 경우 잠시 후 재시도
+                update_gui('action_status', 'error')
                 time.sleep(1)
                 continue
+                
+            # API 데이터 유효성 검사
+            try:
+                orderbook = pyupbit.get_orderbook(ticker)
+            except:
+                orderbook = None
+            
+            is_valid, error_msg = check_api_data_validity(price, orderbook)
+            if not is_valid:
+                log_and_update('API오류', f'{error_msg}')
+                update_gui('action_status', 'error')
+                update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
+                time.sleep(5)  # API 오류 시 5초 대기 후 재시도
+                continue
+                
         except KeyError as e: # 가격 데이터 형식 오류 처리
             log_and_update('오류', f'가격 데이터 조회 오류 (KeyError): {e}')
+            update_gui('action_status', 'error')
             time.sleep(5) # 데이터 형식 오류 시 잠시 대기
             continue
         except requests.exceptions.RequestException as e:
             log_and_update('오류', f'네트워크 오류 발생: {e}')
+            update_gui('action_status', 'error')
             time.sleep(10) # 네트워크 불안정시 더 길게 대기
             continue
         
@@ -1203,7 +1295,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         new_panic_mode = detect_panic_selling(price, previous_prices, config.get("panic_threshold", -5.0))
         if new_panic_mode and not panic_mode:
             log_and_update('급락감지', '급락 대응 모드 활성화')
-            send_kakao_message(f"{ticker} 급락 감지! 대응 모드 활성화")
+            send_kakao_message(f"{get_korean_coin_name(ticker)} 급락 감지! 대응 모드 활성화")
             
             # 동적 그리드 재계산
             new_low, new_high = calculate_dynamic_grid(low_price, high_price, price, True)
@@ -1222,7 +1314,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     lowest_grid_to_buy -= 1
                     log_msg = f"매수 보류 및 목표 하향: {grid_levels[lowest_grid_to_buy]:,.0f}원"
                     log_and_update("데모 매수보류", log_msg)
-                    speak_async(f"{ticker.replace('KRW-','')} 매수 목표 하향")
+                    speak_async(f"{get_korean_coin_name(ticker)} 매수 목표 하향")
+                    update_gui('action_status', 'looking_buy')
                 
                 else:
                     # 가격이 반등하여 최저 그리드를 '확실히' 돌파했는지 체크 (매수 실행)
@@ -1255,9 +1348,14 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                             log_msg = f"하락추세 반등 매수: {buy_price:,.0f}원 ({quantity:.6f}개)"
                             log_and_update("데모 매수", log_msg)
-                            speak_async(f"데모 모드, {ticker.replace('KRW-','')} {buy_price:,.0f}원에 최종 매수되었습니다.")
-                            send_kakao_message(f"[데모 최종매수] {ticker.replace('KRW-','')} {buy_price:,.0f}원 ({quantity:.6f}개)")
+                            speak_async(f"데모 모드, {get_korean_coin_name(ticker)} {buy_price:,.0f}원에 최종 매수되었습니다.")
+                            send_kakao_message(f"[데모 최종매수] {get_korean_coin_name(ticker)} {buy_price:,.0f}원 ({quantity:.6f}개)")
+                            
+                            # 데모 모드에서도 매수 횟수 증가
+                            trade_counts[ticker]["buy"] += 1
+                            
                             update_gui('refresh_chart')
+                            update_gui('action_status', 'trading')
 
                         # 매수 실행 후 상태 초기화
                         buy_pending = False
@@ -1273,8 +1371,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             lowest_grid_to_buy = i
                             log_msg = f"매수 그리드 {grid_price:,.0f}원 도달. 매수 보류 시작."
                             log_and_update("데모 매수보류", log_msg)
-                            speak_async(f"{ticker.replace('KRW-','')} 매수 보류 시작")
+                            speak_async(f"{get_korean_coin_name(ticker)} 매수 보류 시작")
                             update_gui('refresh_chart')
+                            update_gui('action_status', 'looking_buy')
                             break # 첫번째 도달한 그리드만 처리
             
             # 데모 모드 매도 로직 (상승 추세 추종 및 트레일링 스탑 포함)
@@ -1306,8 +1405,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                     log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
                     log_and_update("데모 매도", log_msg)
-                    speak_async(f"데모 모드, {sell_reason}, {ticker.replace('KRW-','')}" + f" {price:,.0f}원에 매도되었습니다.")
-                    send_kakao_message(f"[데모 매도] {ticker.replace('KRW-','')} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
+                    speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
+                    send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     update_gui('refresh_chart')
                     continue # 다음 포지션으로
 
@@ -1323,8 +1422,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         position['target_sell_price'] = new_target_price
                         log_msg = f"매도 보류 및 목표 상향: {new_target_price:,.0f}원"
                         log_and_update("데모 매도보류", log_msg)
-                        speak_async(f"{ticker.replace('KRW-','')} " + "매도 보류 시작")
+                        speak_async(f"{get_korean_coin_name(ticker)} " + "매도 보류 시작")
                         update_gui('refresh_chart')
+                        update_gui('action_status', 'looking_sell')
 
                     else:
                         # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행)
@@ -1345,9 +1445,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                             log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
                             log_and_update("데모 매도", log_msg)
-                            speak_async(f"데모 모드, {ticker.replace('KRW-','')} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
-                            send_kakao_message(f"[데모 최종매도] {ticker.replace('KRW-','')} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원")
+                            speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
+                            send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원")
                             update_gui('refresh_chart')
+                            update_gui('action_status', 'trading')
 
                 else:
                     # 매도 보류 상태가 아닐 때: 최초 목표가 도달 체크
@@ -1362,8 +1463,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         if position['highest_grid_reached'] != -1:
                             log_msg = f"목표가 {position['target_sell_price']:,.0f}원 도달. 매도 보류 시작."
                             log_and_update("데모 매도보류", log_msg)
-                            speak_async(f"{ticker.replace('KRW-','')} " + "매도 보류 시작")
+                            speak_async(f"{get_korean_coin_name(ticker)} " + "매도 보류 시작")
                             update_gui('refresh_chart')
+                            update_gui('action_status', 'looking_sell')
             
             # 긴급 청산 체크
             held_value = sum(pos['quantity'] * price for pos in demo_positions)
@@ -1439,7 +1541,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             # 상세 알림 메시지 생성
             summary_msg = (
-                f"{ticker} 목표 달성 완료!\n"
+                f"{get_korean_coin_name(ticker)} 목표 달성 완료!\n"
                 f"시작 시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"종료 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"목표 수익률: {target_profit_percent}%\n"
@@ -1452,11 +1554,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             break
         
         prev_price = price
+        
+        # 매수/매도 보류 중이 아닐 때는 대기 상태로 설정
+        if not buy_pending and not any(pos.get('sell_held', False) for pos in demo_positions):
+            update_gui('action_status', 'waiting')
+            
         time.sleep(3)
 
     if stop_event.is_set():
         log_and_update('중지', '사용자 요청')
         update_gui('status', "상태: 중지됨", "Orange.TLabel", False, False)
+        update_gui('action_status', 'waiting')
 
 def open_settings_window(parent, current_config, update_callback, grid_recalc_callback):
     """시스템 설정 창을 엽니다."""
@@ -1562,40 +1670,16 @@ def open_settings_window(parent, current_config, update_callback, grid_recalc_ca
     auto_trading_var = tk.BooleanVar(value=current_config.get('auto_trading_mode', False))
     ttk.Checkbutton(auto_frame, text="완전 자동 거래 모드 활성화", variable=auto_trading_var).grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
     
-    ttk.Label(auto_frame, text="리스크 모드:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
-    risk_mode_var = tk.StringVar(value=current_config.get('risk_mode', '안정적'))
-    risk_mode_combo = ttk.Combobox(auto_frame, textvariable=risk_mode_var, 
-                                  values=["보수적", "안정적", "공격적", "극공격적"], 
-                                  state="readonly")
-    risk_mode_combo.grid(row=1, column=1, padx=5, pady=5)
-    
-    ttk.Label(auto_frame, text="자동 업데이트 간격 (분):").grid(row=2, column=0, sticky='w', padx=5, pady=5)
-    update_interval_entry = ttk.Entry(auto_frame)
-    update_interval_entry.insert(0, current_config.get('auto_update_interval', 60))
-    update_interval_entry.grid(row=2, column=1, padx=5, pady=5)
-    
     performance_tracking_var = tk.BooleanVar(value=current_config.get('performance_tracking', True))
-    ttk.Checkbutton(auto_frame, text="실적 추적 활성화", variable=performance_tracking_var).grid(row=3, column=0, columnspan=2, sticky='w', padx=5)
+    ttk.Checkbutton(auto_frame, text="실적 추적 활성화", variable=performance_tracking_var).grid(row=1, column=0, columnspan=2, sticky='w', padx=5)
     
     auto_optimization_var = tk.BooleanVar(value=current_config.get('auto_optimization', True))
-    ttk.Checkbutton(auto_frame, text="자동 최적화 활성화", variable=auto_optimization_var).grid(row=4, column=0, columnspan=2, sticky='w', padx=5)
+    ttk.Checkbutton(auto_frame, text="자동 최적화 활성화", variable=auto_optimization_var).grid(row=2, column=0, columnspan=2, sticky='w', padx=5)
     
-    # 리스크 모드 설명 라벨
-    risk_info_label = ttk.Label(auto_frame, text="", foreground="gray")
-    risk_info_label.grid(row=5, column=0, columnspan=2, padx=5, pady=10, sticky='w')
-    
-    def update_risk_info(*args):
-        """리스크 모드별 설명 업데이트"""
-        risk_mode = risk_mode_var.get()
-        if risk_mode in auto_trading_system.risk_profiles:
-            profile = auto_trading_system.risk_profiles[risk_mode]
-            info_text = (f"투자비율: {profile['max_investment_ratio']*100:.0f}%, "
-                        f"최대그리드: {profile['max_grid_count']}개, "
-                        f"손절선: {profile['stop_loss_threshold']}%")
-            risk_info_label.config(text=info_text)
-    
-    risk_mode_var.trace('w', update_risk_info)
-    update_risk_info()  # 초기값 설정
+    # 참고 정보 라벨
+    info_label = ttk.Label(auto_frame, text="리스크 모드와 업데이트 간격은 메인화면에서 설정할 수 있습니다.", 
+                          foreground="gray", font=('Helvetica', 9))
+    info_label.grid(row=3, column=0, columnspan=2, padx=5, pady=10, sticky='w')
 
     # 6. 알림 설정 탭
     notification_frame = ttk.Frame(notebook)
@@ -1629,10 +1713,8 @@ def open_settings_window(parent, current_config, update_callback, grid_recalc_ca
             current_config['advanced_grid_trading'] = advanced_grid_var.get()
             current_config['grid_confirmation_buffer'] = float(grid_buffer_entry.get())
             current_config['fee_rate'] = float(fee_rate_entry.get()) / 100  # 백분율에서 소수로 변환
-            # Auto Trading
+            # Auto Trading (리스크 모드와 업데이트 간격은 메인화면에서 관리됨)
             current_config['auto_trading_mode'] = auto_trading_var.get()
-            current_config['risk_mode'] = risk_mode_var.get()
-            current_config['auto_update_interval'] = int(update_interval_entry.get())
             current_config['performance_tracking'] = performance_tracking_var.get()
             current_config['auto_optimization'] = auto_optimization_var.get()
             # Notification
@@ -1790,6 +1872,7 @@ def start_dashboard():
             if active_trades:
                 for ticker, stop_event in active_trades.items():
                     stop_event.set()
+                active_trades.clear()  # active_trades 딕셔너리 클리어
             stop_tts_worker()
             root.destroy()
 
@@ -1833,80 +1916,35 @@ def start_dashboard():
     top_frame.grid_columnconfigure(1, weight=1)
 
     # 코인 선택 및 현황
-    # 자동 거래 상태 프레임 추가
-    auto_status_frame = ttk.LabelFrame(top_frame, text="자동 거래 상태")
-    auto_status_frame.grid(row=0, column=0, sticky='ew', padx=(0, 4), pady=(0, 5))
-    
-    auto_mode_label = ttk.Label(auto_status_frame, text="자동 모드: 비활성", foreground="red")
-    auto_mode_label.grid(row=0, column=0, padx=5, pady=2, sticky='w')
-    
-    risk_mode_label = ttk.Label(auto_status_frame, text=f"리스크: {config.get('risk_mode', '안정적')}", foreground="blue")
-    risk_mode_label.grid(row=0, column=1, padx=5, pady=2, sticky='w')
-    
-    last_optimization_label = ttk.Label(auto_status_frame, text="최근 최적화: -", foreground="gray")
-    last_optimization_label.grid(row=0, column=2, padx=5, pady=2, sticky='w')
-    
-    def toggle_auto_mode():
-        """자동 거래 모드 토글"""
-        current = config.get('auto_trading_mode', False)
-        config['auto_trading_mode'] = not current
-        save_config(config)
-        update_auto_status()
-        
-        if config['auto_trading_mode']:
-            # 자동 최적화 시작
-            auto_scheduler.start_auto_optimization(update_config)
-            messagebox.showinfo("자동 모드", "자동 거래 모드가 활성화되었습니다.")
-        else:
-            # 자동 최적화 중지
-            auto_scheduler.stop_auto_optimization()
-            messagebox.showinfo("자동 모드", "자동 거래 모드가 비활성화되었습니다.")
-    
-    def update_auto_status():
-        """자동 거래 상태 업데이트"""
-        if config.get('auto_trading_mode', False):
-            auto_mode_label.config(text="자동 모드: 활성", foreground="green")
-        else:
-            auto_mode_label.config(text="자동 모드: 비활성", foreground="red")
-        
-        risk_mode_label.config(text=f"리스크: {config.get('risk_mode', '안정적')}")
-        
-        last_opt = config.get('last_optimization')
-        if last_opt:
-            try:
-                opt_time = datetime.fromisoformat(last_opt).strftime('%H:%M')
-                last_optimization_label.config(text=f"최근 최적화: {opt_time}")
-            except:
-                last_optimization_label.config(text="최근 최적화: -")
-    
-    auto_toggle_btn = ttk.Button(auto_status_frame, text="자동모드 ON/OFF", command=toggle_auto_mode)
-    auto_toggle_btn.grid(row=0, column=3, padx=5, pady=2)
-    
-    update_auto_status()  # 초기 상태 설정
 
     ticker_frame = ttk.LabelFrame(top_frame, text="코인 선택 및 현황")
-    ticker_frame.grid(row=1, column=0, sticky='nswe', padx=(0, 4))
+    ticker_frame.grid(row=0, column=0, sticky='nswe', padx=(0, 4))
     ticker_vars = {}
     status_labels, current_price_labels, running_time_labels = {}, {}, {}
+    action_status_labels = {}  # 행동 상태 라벨
     detail_labels = {}
     
     tickers = ("KRW-BTC", "KRW-ETH", "KRW-XRP")
     for i, ticker in enumerate(tickers):
         var = tk.IntVar()
         cb = ttk.Checkbutton(ticker_frame, text=ticker, variable=var)
-        cb.grid(row=i*5, column=0, sticky='w', padx=3, pady=1)
+        cb.grid(row=i*6, column=0, sticky='w', padx=3, pady=1)
         ticker_vars[ticker] = var
         
         # 상태 및 운영시간
         status_labels[ticker] = ttk.Label(ticker_frame, text="상태: 대기중", style="Gray.TLabel")
-        status_labels[ticker].grid(row=i*5, column=1, sticky='w', padx=3)
+        status_labels[ticker].grid(row=i*6, column=1, sticky='w', padx=3)
         
         running_time_labels[ticker] = ttk.Label(ticker_frame, text="운영시간: 00:00:00", style="Gray.TLabel")
-        running_time_labels[ticker].grid(row=i*5, column=2, sticky='w', padx=3)
+        running_time_labels[ticker].grid(row=i*6, column=2, sticky='w', padx=3)
         
         # 현재가
         current_price_labels[ticker] = ttk.Label(ticker_frame, text="현재가: -", style="Gray.TLabel")
-        current_price_labels[ticker].grid(row=i*5, column=3, sticky='w', padx=3)
+        current_price_labels[ticker].grid(row=i*6, column=3, sticky='w', padx=3)
+        
+        # 행동 상태 (새로 추가)
+        action_status_labels[ticker] = ttk.Label(ticker_frame, text="🔍 대기중", style="Blue.TLabel", font=('Helvetica', 9, 'bold'))
+        action_status_labels[ticker].grid(row=i*6+1, column=1, columnspan=2, sticky='w', padx=3)
         
         # 상세 정보
         detail_labels[ticker] = {
@@ -1917,37 +1955,57 @@ def start_dashboard():
             'cash': ttk.Label(ticker_frame, text="현금: 0원", style="Gray.TLabel"),
             'coin_qty': ttk.Label(ticker_frame, text="보유: 0개", style="Gray.TLabel"),
             'coin_value': ttk.Label(ticker_frame, text="코인가치: 0원", style="Gray.TLabel"),
-            'total_value': ttk.Label(ticker_frame, text="총자산: 0원", style="Gray.TLabel")
+            'total_value': ttk.Label(ticker_frame, text="총자산: 0원", style="Gray.TLabel"),
+            'buy_count': ttk.Label(ticker_frame, text="📈 매수: 0회", style="Gray.TLabel", font=('Helvetica', 8)),
+            'sell_count': ttk.Label(ticker_frame, text="📉 매도: 0회", style="Gray.TLabel", font=('Helvetica', 8))
         }
         
-        detail_labels[ticker]['profit'].grid(row=i*5+1, column=0, sticky='w', padx=3)
-        detail_labels[ticker]['profit_rate'].grid(row=i*5+1, column=1, sticky='w', padx=3)
-        detail_labels[ticker]['realized_profit'].grid(row=i*5+1, column=2, sticky='w', padx=3)
-        detail_labels[ticker]['realized_profit_rate'].grid(row=i*5+1, column=3, sticky='w', padx=3)
-        detail_labels[ticker]['cash'].grid(row=i*5+2, column=0, sticky='w', padx=3)
-        detail_labels[ticker]['coin_qty'].grid(row=i*5+2, column=1, sticky='w', padx=3)
-        detail_labels[ticker]['coin_value'].grid(row=i*5+2, column=2, sticky='w', padx=3)
-        detail_labels[ticker]['total_value'].grid(row=i*5+2, column=3, sticky='w', padx=3)
+        detail_labels[ticker]['profit'].grid(row=i*6+2, column=0, sticky='w', padx=3)
+        detail_labels[ticker]['profit_rate'].grid(row=i*6+2, column=1, sticky='w', padx=3)
+        detail_labels[ticker]['realized_profit'].grid(row=i*6+2, column=2, sticky='w', padx=3)
+        detail_labels[ticker]['realized_profit_rate'].grid(row=i*6+2, column=3, sticky='w', padx=3)
+        detail_labels[ticker]['cash'].grid(row=i*6+3, column=0, sticky='w', padx=3)
+        detail_labels[ticker]['coin_qty'].grid(row=i*6+3, column=1, sticky='w', padx=3)
+        detail_labels[ticker]['coin_value'].grid(row=i*6+3, column=2, sticky='w', padx=3)
+        detail_labels[ticker]['total_value'].grid(row=i*6+3, column=3, sticky='w', padx=3)
+        detail_labels[ticker]['buy_count'].grid(row=i*6+4, column=0, columnspan=2, sticky='w', padx=3)
+        detail_labels[ticker]['sell_count'].grid(row=i*6+4, column=2, columnspan=2, sticky='w', padx=3)
         
         # 구분선
         if i < len(tickers) - 1:
             sep = ttk.Separator(ticker_frame, orient='horizontal')
-            sep.grid(row=i*5+4, column=0, columnspan=4, sticky='ew', pady=3)
+            sep.grid(row=i*6+5, column=0, columnspan=4, sticky='ew', pady=3)
 
     # 총 실현수익 및 수익률 표시 라벨
     total_profit_label = ttk.Label(ticker_frame, text="총 실현수익: 0원", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
-    total_profit_label.grid(row=len(tickers)*5 + 5, column=0, columnspan=2, sticky='w', padx=3, pady=5)
+    total_profit_label.grid(row=len(tickers)*6 + 1, column=0, columnspan=2, sticky='w', padx=3, pady=5)
 
     total_profit_rate_label = ttk.Label(ticker_frame, text="총 실현수익률: (0.00%)", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
-    total_profit_rate_label.grid(row=len(tickers)*5 + 5, column=2, columnspan=2, sticky='w', padx=3, pady=5)
+    total_profit_rate_label.grid(row=len(tickers)*6 + 1, column=2, columnspan=2, sticky='w', padx=3, pady=5)
 
     # 그리드 투자 설정
-    settings_frame = ttk.LabelFrame(top_frame, text="그리드 투자 설정")
+    settings_frame = ttk.LabelFrame(top_frame, text="🔧 그리드 투자 설정")
     settings_frame.grid(row=0, column=1, sticky='nswe', padx=(4, 0))
     settings_frame.grid_columnconfigure(1, weight=1)
     
-    settings_icon_frame = ttk.Frame(settings_frame)
-    settings_icon_frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 10))
+    # 자동거래 상태 정보 프레임
+    status_info_frame = ttk.Frame(settings_frame)
+    status_info_frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(5, 10))
+    status_info_frame.grid_columnconfigure(0, weight=1)
+    status_info_frame.grid_columnconfigure(1, weight=1)
+    
+    # 자동거래 상태 라벨들
+    auto_mode_label = ttk.Label(status_info_frame, text="🔴 자동 모드: 비활성", foreground="red", font=('Helvetica', 9, 'bold'))
+    auto_mode_label.grid(row=0, column=0, sticky='w', padx=3)
+    
+    update_interval_label = ttk.Label(status_info_frame, text=f"⏰ 업데이트: {config.get('auto_update_interval', 60)}분", foreground="purple", font=('Helvetica', 8))
+    update_interval_label.grid(row=1, column=0, sticky='w', padx=3)
+    
+    risk_mode_status_label = ttk.Label(status_info_frame, text=f"⚡ 리스크: {config.get('risk_mode', '안정적')}", foreground="blue", font=('Helvetica', 9, 'bold'))
+    risk_mode_status_label.grid(row=0, column=1, sticky='w', padx=3)
+    
+    last_optimization_label = ttk.Label(status_info_frame, text="🔄 최근 최적화: -", foreground="gray", font=('Helvetica', 8))
+    last_optimization_label.grid(row=1, column=1, sticky='w', padx=3)
 
     ttk.Label(settings_frame, text="총 투자 금액 (KRW):").grid(row=1, column=0, sticky='w', padx=3, pady=1)
     amount_entry = ttk.Entry(settings_frame)
@@ -1973,9 +2031,161 @@ def start_dashboard():
     target_entry.insert(0, config.get("target_profit_percent", "10"))
     target_entry.grid(row=5, column=1, sticky='ew', padx=3)
 
+    # 자동거래 제어 및 설정
+    control_frame = ttk.Frame(settings_frame)
+    control_frame.grid(row=6, column=0, columnspan=2, sticky='ew', pady=(5, 5))
+    control_frame.grid_columnconfigure(1, weight=1)
+    
+    ttk.Label(control_frame, text="자동거래 모드:").grid(row=0, column=0, sticky='w', padx=3, pady=1)
+    auto_trading_var = tk.BooleanVar(value=config.get("auto_trading_mode", False))
+    auto_trading_check = ttk.Checkbutton(control_frame, text="🤖 활성화", variable=auto_trading_var)
+    auto_trading_check.grid(row=0, column=1, sticky='w', padx=3, pady=1)
+
+    # 리스크 모드 선택
+    ttk.Label(control_frame, text="리스크 모드:").grid(row=1, column=0, sticky='w', padx=3, pady=1)
+    risk_mode_combo = ttk.Combobox(control_frame, values=["보수적", "안정적", "공격적", "극공격적"], state="readonly")
+    risk_mode_combo.set(config.get("risk_mode", "보수적"))
+    risk_mode_combo.grid(row=1, column=1, sticky='ew', padx=3)
+    
+    # 업데이트 간격 설정
+    ttk.Label(control_frame, text="업데이트 간격(분):").grid(row=2, column=0, sticky='w', padx=3, pady=1)
+    update_interval_entry = ttk.Entry(control_frame, width=15)
+    update_interval_entry.insert(0, str(config.get("auto_update_interval", 60)))
+    update_interval_entry.grid(row=2, column=1, sticky='w', padx=3)
+    
+    # 자동거래 상태 업데이트 함수들
+    def update_auto_status():
+        """자동 거래 상태 업데이트"""
+        if config.get('auto_trading_mode', False):
+            auto_mode_label.config(text="🟢 자동 모드: 활성", foreground="green")
+        else:
+            auto_mode_label.config(text="🔴 자동 모드: 비활성", foreground="red")
+        
+        risk_mode = config.get('risk_mode', '안정적')
+        risk_colors = {"보수적": "blue", "안정적": "green", "공격적": "orange", "극공격적": "red"}
+        risk_mode_status_label.config(text=f"⚡ 리스크: {risk_mode}", foreground=risk_colors.get(risk_mode, "blue"))
+        
+        # 업데이트 간격 표시
+        update_interval_label.config(text=f"⏰ 업데이트: {config.get('auto_update_interval', 60)}분")
+        
+        last_opt = config.get('last_optimization')
+        if last_opt:
+            try:
+                opt_time = datetime.fromisoformat(last_opt).strftime('%H:%M')
+                last_optimization_label.config(text=f"🔄 최근 최적화: {opt_time}")
+            except:
+                last_optimization_label.config(text="🔄 최근 최적화: -")
+        else:
+            last_optimization_label.config(text="🔄 최근 최적화: -")
+    
+    def update_action_status(ticker, status_type):
+        """코인별 행동 상태 업데이트
+        status_type: 'waiting', 'looking_buy', 'looking_sell', 'trading', 'error'
+        """
+        status_texts = {
+            'waiting': "🔍 대기중",
+            'looking_buy': "📈 매수 시점 찾는 중",
+            'looking_sell': "📉 매도 시점 찾는 중", 
+            'trading': "⚡ 거래 실행 중",
+            'error': "❌ API 오류 감지됨"
+        }
+        
+        status_colors = {
+            'waiting': "Blue.TLabel",
+            'looking_buy': "Green.TLabel", 
+            'looking_sell': "Orange.TLabel",
+            'trading': "Purple.TLabel",
+            'error': "Red.TLabel"
+        }
+        
+        if ticker in action_status_labels:
+            action_status_labels[ticker].config(
+                text=status_texts.get(status_type, "🔍 대기중"),
+                style=status_colors.get(status_type, "Blue.TLabel")
+            )
+    
+    def check_api_data_validity(ticker, current_price, orderbook=None):
+        """API 데이터 유효성 검사"""
+        try:
+            # 기본 가격 유효성 검사
+            if current_price is None or current_price <= 0:
+                return False, "현재가 데이터 오류"
+            
+            # 오더북 데이터가 있는 경우 추가 검사
+            if orderbook:
+                if not orderbook.get('orderbook_units') or len(orderbook['orderbook_units']) == 0:
+                    return False, "오더북 데이터 없음"
+                
+                # 매수/매도 호가 존재 여부 확인
+                first_unit = orderbook['orderbook_units'][0]
+                if not first_unit.get('bid_price') or not first_unit.get('ask_price'):
+                    return False, "매수/매도 호가 데이터 오류"
+                
+                # 스프레드 이상치 검사 (현재가 대비 5% 이상 차이나면 오류로 간주)
+                bid_price = first_unit['bid_price']
+                ask_price = first_unit['ask_price']
+                spread_ratio = (ask_price - bid_price) / current_price
+                if spread_ratio > 0.05:  # 5% 이상 스프레드는 비정상
+                    return False, f"비정상적인 스프레드: {spread_ratio:.2%}"
+            
+            return True, "정상"
+            
+        except Exception as e:
+            return False, f"데이터 검증 오류: {str(e)}"
+    
+    def toggle_auto_mode():
+        """자동 거래 모드 토글"""
+        current = config.get('auto_trading_mode', False)
+        config['auto_trading_mode'] = not current
+        auto_trading_var.set(not current)
+        save_config(config)
+        update_auto_status()
+        
+        if config['auto_trading_mode']:
+            # 자동 최적화 시작
+            auto_scheduler.start_auto_optimization(update_config)
+            messagebox.showinfo("자동 모드", "자동 거래 모드가 활성화되었습니다.")
+        else:
+            # 자동 최적화 중지
+            auto_scheduler.stop_auto_optimization()
+            messagebox.showinfo("자동 모드", "자동 거래 모드가 비활성화되었습니다.")
+    
+    # 변경시 즉시 자동거래 상태 업데이트
+    def on_auto_trading_change():
+        config["auto_trading_mode"] = auto_trading_var.get()
+        save_config(config)
+        update_auto_status()
+        
+        if config['auto_trading_mode']:
+            auto_scheduler.start_auto_optimization(update_config)
+        else:
+            auto_scheduler.stop_auto_optimization()
+    
+    def on_risk_mode_change(event):
+        config["risk_mode"] = risk_mode_combo.get()
+        save_config(config)
+        update_auto_status()
+    
+    auto_trading_var.trace('w', lambda *args: on_auto_trading_change())
+    risk_mode_combo.bind('<<ComboboxSelected>>', on_risk_mode_change)
+    
+    # 버튼 프레임 준비 (실제 버튼들은 함수 정의 후에 생성)
+    main_button_frame = ttk.Frame(settings_frame)
+    main_button_frame.grid(row=7, column=0, columnspan=2, sticky='ew', pady=(10, 5))
+    main_button_frame.grid_columnconfigure(0, weight=4)  # 거래시작 버튼 영역 (40% 비율)
+    main_button_frame.grid_columnconfigure(1, weight=3)  # 자동모드 버튼 영역 (30% 비율)
+    main_button_frame.grid_columnconfigure(2, weight=3)  # 고급설정 버튼 영역 (30% 비율)
+    
+    # 버튼 스타일 정의
+    button_style = ttk.Style()
+    button_style.configure('Small.TButton', font=('Helvetica', 9), padding=(2, 0))
+
     demo_var = tk.IntVar(value=config.get("demo_mode", 1))
     demo_check = ttk.Checkbutton(settings_frame, text="데모 모드", variable=demo_var)
-    demo_check.grid(row=6, column=0, columnspan=2, sticky='w', padx=3, pady=3)
+    demo_check.grid(row=8, column=0, columnspan=2, sticky='w', padx=3, pady=3)
+    
+    # 초기 자동거래 상태 설정
+    update_auto_status()
 
     def add_log_to_gui(log_entry):
         """GUI 로그 트리에 새 로그 항목 추가"""
@@ -1993,6 +2203,7 @@ def start_dashboard():
         if active_trades:
             for ticker, stop_event in active_trades.items():
                 stop_event.set()
+            active_trades.clear()  # active_trades 딕셔너리 클리어
             toggle_button.config(text="거래 시작")
             return
 
@@ -2014,7 +2225,19 @@ def start_dashboard():
             config["target_profit_percent"] = target_entry.get()
             config["demo_mode"] = demo_var.get()
             config["auto_grid_count"] = auto_grid_var.get()
+            config["auto_trading_mode"] = auto_trading_var.get()
+            config["risk_mode"] = risk_mode_combo.get()
+            
+            # 업데이트 간격 저장
+            try:
+                config["auto_update_interval"] = int(update_interval_entry.get())
+            except ValueError:
+                config["auto_update_interval"] = 60  # 기본값
+                
             save_config(config)
+            
+            # 자동거래 상태 업데이트
+            update_auto_status()
 
             total_investment = float(amount_entry.get())
             grid_count = int(grid_entry.get())
@@ -2068,8 +2291,18 @@ def start_dashboard():
                 trade_thread.start()
                 status_labels[ticker].config(text="상태: 시작중...", style="Blue.TLabel")
 
-    toggle_button = ttk.Button(settings_frame, text="거래 시작", command=toggle_trading)
-    toggle_button.grid(row=7, column=0, columnspan=2, pady=10)
+    # toggle_trading 함수 정의 후 버튼들 생성
+    # 거래시작 버튼
+    toggle_button = ttk.Button(main_button_frame, text="거래 시작", command=toggle_trading)
+    toggle_button.grid(row=0, column=0, padx=(0, 5), sticky='nsew')
+    
+    # 자동모드 토글 버튼 (폭 30% 축소, 높이는 거래시작 버튼과 동일)
+    auto_toggle_btn = ttk.Button(main_button_frame, text="🤖 자동모드", command=toggle_auto_mode, style='Small.TButton')
+    auto_toggle_btn.grid(row=0, column=1, padx=(2, 2), sticky='nsew')
+    
+    # 설정 버튼 (폭 30% 축소, 높이는 거래시작 버튼과 동일)
+    settings_btn = ttk.Button(main_button_frame, text="⚙️ 고급설정", command=lambda: open_settings_window(root, config, update_config, None), style='Small.TButton')
+    settings_btn.grid(row=0, column=2, padx=(2, 0), sticky='nsew')
 
     def update_grid_count_on_period_change(event):
         if auto_grid_var.get():
@@ -2105,10 +2338,19 @@ def start_dashboard():
 
     period_combo.bind("<<ComboboxSelected>>", update_grid_count_on_period_change)
 
-    ttk.Button(settings_icon_frame, text="⚙️ 시스템 설정", 
-               command=lambda: open_settings_window(root, config, update_config, update_grid_count_on_period_change)).pack(side='left')
-    ttk.Button(settings_icon_frame, text="📊 백테스트", 
-               command=lambda: open_backtest_window(root, amount_entry.get(), grid_entry.get(), period_combo.get(), auto_grid_var.get())).pack(side='left', padx=(10, 0))
+    # 추가 기능 버튼들을 settings_frame의 하단에 배치
+    additional_buttons_frame = ttk.Frame(settings_frame)
+    additional_buttons_frame.grid(row=9, column=0, columnspan=2, sticky='ew', pady=(5, 5))
+    additional_buttons_frame.grid_columnconfigure(0, weight=1)
+    additional_buttons_frame.grid_columnconfigure(1, weight=1)
+    
+    # 첫 번째 줄 버튼들
+    button_row1 = ttk.Frame(additional_buttons_frame)
+    button_row1.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 5))
+    
+    ttk.Button(button_row1, text="📊 백테스트", 
+               command=lambda: open_backtest_window(root, amount_entry.get(), grid_entry.get(), period_combo.get(), auto_grid_var.get())).pack(side='left', padx=(0, 5))
+    
     def export_data_to_excel():
         success, filename = export_to_excel()
         if success:
@@ -2116,10 +2358,10 @@ def start_dashboard():
         else:
             messagebox.showerror("오류", f"내보내기 실패: {filename}")
 
-    ttk.Button(settings_icon_frame, text="📄 엑셀 내보내기", 
-               command=export_data_to_excel).pack(side='left', padx=(10, 0))
-    ttk.Button(settings_icon_frame, text="데이터 초기화", 
-               command=lambda: clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits)).pack(side='left', padx=(10, 0))
+    ttk.Button(button_row1, text="📄 엑셀 내보내기", 
+               command=export_data_to_excel).pack(side='left', padx=(5, 5))
+    ttk.Button(button_row1, text="🗑️ 데이터 초기화", 
+               command=lambda: clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits)).pack(side='left', padx=(5, 0))
 
     def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits):
         # Clear log_tree
@@ -2137,6 +2379,12 @@ def start_dashboard():
             detail_labels[ticker]['coin_qty'].config(text="보유: 0개", style="Gray.TLabel")
             detail_labels[ticker]['coin_value'].config(text="코인가치: 0원", style="Gray.TLabel")
             detail_labels[ticker]['total_value'].config(text="총자산: 0원", style="Gray.TLabel")
+            detail_labels[ticker]['buy_count'].config(text="📈 매수: 0회", style="Gray.TLabel")
+            detail_labels[ticker]['sell_count'].config(text="📉 매도: 0회", style="Gray.TLabel")
+            
+            # 매수/매도 개수 초기화
+            trade_counts[ticker]["buy"] = 0
+            trade_counts[ticker]["sell"] = 0
 
 
         # Clear tickers and related data structures
@@ -2397,6 +2645,8 @@ def start_dashboard():
                     add_log_to_gui(args[0])
                 elif key == 'status':
                     status_labels[ticker].config(text=args[0], style=args[1])
+                elif key == 'action_status':
+                    update_action_status(ticker, args[0])
                 elif key == 'price':
                     current_price_labels[ticker].config(text=args[0], style=args[1])
                 elif key == 'running_time':
@@ -2421,6 +2671,8 @@ def start_dashboard():
                     detail_labels[ticker]['coin_qty'].config(text=f"보유: {coin_qty:.6f}개", style="Black.TLabel")
                     detail_labels[ticker]['coin_value'].config(text=f"코인가치: {held_value:,.0f}원", style="Black.TLabel")
                     detail_labels[ticker]['total_value'].config(text=f"총자산: {total_value:,.0f}원", style="Blue.TLabel")
+                    detail_labels[ticker]['buy_count'].config(text=f"📈 매수: {trade_counts[ticker]['buy']}회", style="Black.TLabel")
+                    detail_labels[ticker]['sell_count'].config(text=f"📉 매도: {trade_counts[ticker]['sell']}회", style="Black.TLabel")
 
                     all_ticker_total_values[ticker] = total_value
                     all_ticker_start_balances[ticker] = float(config.get("total_investment", "0")) 
