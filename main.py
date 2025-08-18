@@ -2220,15 +2220,65 @@ def start_dashboard():
     # 초기 자동거래 상태 설정
     update_auto_status()
 
-    def add_log_to_gui(log_entry):
-        """GUI 로그 트리에 새 로그 항목 추가"""
-        ticker = log_entry.get('ticker', 'SYSTEM')
-        action = log_entry.get('action', '')
-        price_info = log_entry.get('price', '')
-        log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    def show_trading_log_popup():
+        """실시간 거래 로그 팝업창 표시"""
+        popup = tk.Toplevel(root)
+        popup.title("실시간 거래 로그")
+        popup.geometry("800x500")
+        popup.resizable(True, True)
         
-        log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
-        log_tree.yview_moveto(1) # 항상 최신 로그가 보이도록 스크롤
+        # 팝업 창을 부모 창 중앙에 위치
+        popup.transient(root)
+        popup.grab_set()
+        
+        # 로그 트리뷰 생성
+        log_tree_popup = ttk.Treeview(popup, columns=("시간", "코인", "종류", "가격"), show='headings')
+        log_tree_popup.heading("시간", text="시간")
+        log_tree_popup.heading("코인", text="코인")
+        log_tree_popup.heading("종류", text="종류")
+        log_tree_popup.heading("가격", text="내용")
+        log_tree_popup.column("시간", width=120, anchor='center')
+        log_tree_popup.column("코인", width=80, anchor='center')
+        log_tree_popup.column("종류", width=100, anchor='center')
+        log_tree_popup.column("가격", width=400, anchor='w')
+        
+        # 스크롤바 추가
+        scrollbar_popup = ttk.Scrollbar(popup, orient='vertical', command=log_tree_popup.yview)
+        log_tree_popup.configure(yscrollcommand=scrollbar_popup.set)
+        scrollbar_popup.pack(side='right', fill='y')
+        log_tree_popup.pack(side='left', expand=True, fill='both')
+        
+        # 기존 로그 로드
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+                for log_entry in logs:
+                    ticker = log_entry.get('ticker', 'SYSTEM')
+                    action = log_entry.get('action', '')
+                    price_info = log_entry.get('price', '')
+                    log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                    log_tree_popup.insert('', 'end', values=(log_time, ticker, action, price_info))
+                    
+                # 최신 로그가 보이도록 스크롤
+                if logs:
+                    log_tree_popup.yview_moveto(1)
+        except (FileNotFoundError, json.JSONDecodeError):
+            # 로그 파일이 없거나 손상된 경우 빈 상태로 시작
+            pass
+        
+        # 닫기 버튼 프레임
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Button(button_frame, text="닫기", command=popup.destroy).pack(side='right')
+        
+        return log_tree_popup
+
+    def add_log_to_gui(log_entry):
+        """로그 파일에 저장 (GUI 표시는 팝업에서 처리)"""
+        # 로그는 파일에만 저장하고, 팝업에서 필요할 때 로드
+        # 이 함수는 기존 코드 호환성을 위해 유지하되, 실제 GUI 업데이트는 하지 않음
+        pass
 
     def load_previous_trading_state():
         """이전 거래 상태를 로드하여 이어서 거래할 수 있도록 함"""
@@ -2422,12 +2472,12 @@ def start_dashboard():
     ttk.Button(button_row1, text="📄 엑셀 내보내기", 
                command=export_data_to_excel).pack(side='left', padx=(5, 5))
     ttk.Button(button_row1, text="🗑️ 데이터 초기화", 
-               command=lambda: clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits)).pack(side='left', padx=(5, 0))
+               command=lambda: clear_all_data(None, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits)).pack(side='left', padx=(5, 5))
+    ttk.Button(button_row1, text="📊 거래 로그", 
+               command=show_trading_log_popup).pack(side='left', padx=(5, 0))
 
     def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits):
-        # Clear log_tree
-        for item in log_tree.get_children():
-            log_tree.delete(item)
+        # log_tree는 더 이상 사용하지 않음 (팝업으로 대체)
 
         # 2. 각 티커별 상세 정보 초기화
         # 2. 각 티커별 상세 정보 초기화 (이 부분은 이미 clear_all_data 함수 내에 있으므로 중복 제거)
@@ -2681,45 +2731,9 @@ def start_dashboard():
 
         canvas.draw_idle()
 
-    # 하단 프레임 (로그)
-    log_frame = ttk.LabelFrame(main_frame, text="실시간 거래 기록")
-    log_frame.pack(expand=True, fill='both')
-    
-    log_tree = ttk.Treeview(log_frame, columns=("시간", "코인", "종류", "가격"), show='headings')
-    log_tree.heading("시간", text="시간")
-    log_tree.heading("코인", text="코인")
-    log_tree.heading("종류", text="종류")
-    log_tree.heading("가격", text="내용")
-    log_tree.column("시간", width=120, anchor='center')
-    log_tree.column("코인", width=80, anchor='center')
-    log_tree.column("종류", width=100, anchor='center')
-    log_tree.column("가격", width=400, anchor='w')
-    
-    scrollbar = ttk.Scrollbar(log_frame, orient='vertical', command=log_tree.yview)
-    log_tree.configure(yscrollcommand=scrollbar.set)
-    scrollbar.pack(side='right', fill='y')
-    log_tree.pack(side='left', expand=True, fill='both')
+    # 실시간 거래 로그는 팝업으로 대체 (하단 프레임 제거)
 
-    def load_initial_logs():
-        """초기 로그 로드"""
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                logs = json.load(f)
-            all_logs = []
-            for ticker, ticker_logs in logs.items():
-                for log in ticker_logs:
-                    full_log = log.copy()
-                    full_log['ticker'] = ticker
-                    all_logs.append(full_log)
-            
-            # 시간순으로 정렬
-            all_logs.sort(key=lambda x: x.get('time', ''))
-            
-            for log in all_logs:
-                add_log_to_gui(log)
-
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
+    # load_initial_logs 함수는 더 이상 필요 없음 (팝업에서 직접 로드)
 
     def get_profit_color_style(profit):
         """수익에 따른 색상 스타일 반환"""
@@ -2808,7 +2822,6 @@ def start_dashboard():
     chart_refresh_btn.pack(pady=5)
 
     # 초기화
-    load_initial_logs()
     process_gui_queue()
     initialize_upbit()  # 업비트 API 초기화
     
