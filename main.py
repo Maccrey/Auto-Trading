@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import requests
 from queue import Queue
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import pandas as pd
 import numpy as np
@@ -2633,7 +2633,189 @@ def start_dashboard():
     fig.tight_layout()
     canvas = FigureCanvasTkAgg(fig, chart_container)
     canvas.draw()
-    canvas.get_tk_widget().pack(fill='x')
+    canvas.get_tk_widget().pack(fill='both', expand=True)
+    
+    # 네비게이션 툴바 추가 (확대/축소/팬 기능)
+    toolbar = NavigationToolbar2Tk(canvas, chart_container)
+    toolbar.update()
+    
+    # 마우스 휠을 사용한 확대/축소 기능
+    def on_scroll(event):
+        if event.inaxes is None:
+            return
+        
+        # 현재 축 범위 가져오기
+        ax = event.inaxes
+        xdata = event.xdata
+        ydata = event.ydata
+        
+        if xdata is None or ydata is None:
+            return
+            
+        # 확대/축소 비율
+        base_scale = 1.1
+        
+        # 휠 방향에 따른 확대/축소
+        if event.button == 'up':
+            scale_factor = 1 / base_scale
+        elif event.button == 'down':
+            scale_factor = base_scale
+        else:
+            return
+            
+        # 현재 축 범위
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        # 마우스 포인터를 중심으로 확대/축소
+        xrange = xlim[1] - xlim[0]
+        yrange = ylim[1] - ylim[0]
+        
+        new_xrange = xrange * scale_factor
+        new_yrange = yrange * scale_factor
+        
+        # 마우스 포인터 위치 기준으로 새로운 범위 계산
+        x_center_ratio = (xdata - xlim[0]) / xrange
+        y_center_ratio = (ydata - ylim[0]) / yrange
+        
+        new_xlim = [xdata - new_xrange * x_center_ratio, 
+                   xdata + new_xrange * (1 - x_center_ratio)]
+        new_ylim = [ydata - new_yrange * y_center_ratio, 
+                   ydata + new_yrange * (1 - y_center_ratio)]
+        
+        ax.set_xlim(new_xlim)
+        ax.set_ylim(new_ylim)
+        
+        canvas.draw_idle()
+    
+    # 마우스 휠 이벤트 연결
+    canvas.mpl_connect('scroll_event', on_scroll)
+    
+    # 키보드 단축키를 통한 확대/축소 기능
+    def on_key_press(event):
+        if event.inaxes is None:
+            return
+            
+        ax = event.inaxes
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        scale_factor = 1.1
+        
+        # 현재 범위의 중심점 계산
+        x_center = (xlim[0] + xlim[1]) / 2
+        y_center = (ylim[0] + ylim[1]) / 2
+        
+        xrange = xlim[1] - xlim[0]
+        yrange = ylim[1] - ylim[0]
+        
+        # 이동 거리 (현재 범위의 10%)
+        pan_factor = 0.1
+        x_move = xrange * pan_factor
+        y_move = yrange * pan_factor
+        
+        if event.key == '+' or event.key == '=':  # 확대
+            new_xrange = xrange / scale_factor
+            new_yrange = yrange / scale_factor
+            # 중심점 기준으로 새로운 범위 설정
+            new_xlim = [x_center - new_xrange/2, x_center + new_xrange/2]
+            new_ylim = [y_center - new_yrange/2, y_center + new_yrange/2]
+        elif event.key == '-':  # 축소
+            new_xrange = xrange * scale_factor
+            new_yrange = yrange * scale_factor
+            # 중심점 기준으로 새로운 범위 설정
+            new_xlim = [x_center - new_xrange/2, x_center + new_xrange/2]
+            new_ylim = [y_center - new_yrange/2, y_center + new_yrange/2]
+        elif event.key == 'r':  # 리셋 (전체 범위 표시)
+            # 전체 데이터 범위로 리셋
+            ax.relim()
+            ax.autoscale()
+            canvas.draw_idle()
+            return
+        elif event.key == 'left':  # 왼쪽으로 이동
+            new_xlim = [xlim[0] - x_move, xlim[1] - x_move]
+            new_ylim = ylim
+        elif event.key == 'right':  # 오른쪽으로 이동
+            new_xlim = [xlim[0] + x_move, xlim[1] + x_move]
+            new_ylim = ylim
+        elif event.key == 'up':  # 위로 이동
+            new_xlim = xlim
+            new_ylim = [ylim[0] + y_move, ylim[1] + y_move]
+        elif event.key == 'down':  # 아래로 이동
+            new_xlim = xlim
+            new_ylim = [ylim[0] - y_move, ylim[1] - y_move]
+        else:
+            return
+        
+        ax.set_xlim(new_xlim)
+        ax.set_ylim(new_ylim)
+        
+        canvas.draw_idle()
+    
+    # 키보드 이벤트 연결
+    canvas.mpl_connect('key_press_event', on_key_press)
+    
+    # 마우스 드래그를 통한 팬(이동) 기능
+    drag_data = {'pressed': False, 'start_x': None, 'start_y': None, 'xlim': None, 'ylim': None, 'ax': None}
+    
+    def on_button_press(event):
+        """마우스 버튼 누름 이벤트"""
+        if event.button == 1 and event.inaxes is not None and event.xdata is not None and event.ydata is not None:  # 좌클릭
+            drag_data['pressed'] = True
+            drag_data['start_x'] = event.xdata
+            drag_data['start_y'] = event.ydata
+            drag_data['ax'] = event.inaxes
+            drag_data['xlim'] = list(event.inaxes.get_xlim())
+            drag_data['ylim'] = list(event.inaxes.get_ylim())
+    
+    def on_button_release(event):
+        """마우스 버튼 릴리즈 이벤트"""
+        if drag_data['pressed']:
+            drag_data['pressed'] = False
+            drag_data['start_x'] = None
+            drag_data['start_y'] = None
+            drag_data['ax'] = None
+            drag_data['xlim'] = None
+            drag_data['ylim'] = None
+    
+    def on_motion(event):
+        """마우스 이동 이벤트 (드래그 및 호버)"""
+        # 드래그 기능
+        if (drag_data['pressed'] and 
+            event.inaxes == drag_data['ax'] and 
+            event.xdata is not None and 
+            event.ydata is not None and
+            drag_data['start_x'] is not None and
+            drag_data['start_y'] is not None):
+            
+            # 드래그 거리 계산
+            dx = drag_data['start_x'] - event.xdata
+            dy = drag_data['start_y'] - event.ydata
+            
+            # 원래 축 범위 기준으로 새로운 범위 계산
+            xlim = drag_data['xlim']
+            ylim = drag_data['ylim']
+            
+            new_xlim = [xlim[0] + dx, xlim[1] + dx]
+            new_ylim = [ylim[0] + dy, ylim[1] + dy]
+            
+            # 축 범위 업데이트
+            drag_data['ax'].set_xlim(new_xlim)
+            drag_data['ax'].set_ylim(new_ylim)
+            
+            canvas.draw_idle()
+        elif not drag_data['pressed']:
+            # 드래그 중이 아닐 때만 호버 기능 호출
+            on_hover(event)
+    
+    # 마우스 이벤트 연결
+    canvas.mpl_connect('button_press_event', on_button_press)
+    canvas.mpl_connect('button_release_event', on_button_release)
+    canvas.mpl_connect('motion_notify_event', on_motion)
+    
+    # 캔버스가 키보드 포커스를 받을 수 있도록 설정
+    canvas.get_tk_widget().focus_set()
+    canvas.get_tk_widget().bind('<Button-1>', lambda e: canvas.get_tk_widget().focus_set())
 
     def on_hover(event):
         if event.inaxes is None:
@@ -2668,8 +2850,6 @@ def start_dashboard():
                 if not found and annot.get_visible():
                     annot.set_visible(False)
                     canvas.draw_idle()
-
-    canvas.mpl_connect("motion_notify_event", on_hover)
 
     def update_chart(ticker, period):
         """차트 업데이트"""
