@@ -81,7 +81,7 @@ default_config = {
     "trailing_stop": True,  # 트레일링 스탑 사용
     "trailing_stop_percent": 3.0,  # 트레일링 스탑 비율 (%)
     "use_limit_orders": True,  # 지정가 주문 사용
-    "limit_order_buffer": 0.2,  # 지정가 주문 버퍼 (%)
+    "limit_order_buffer": 0.1,  # 지정가 주문 버퍼 (0.1%로 조정)
     "max_position_size": 0.3,  # 최대 포지션 크기 (총 자산 대비)
     "emergency_exit_enabled": True,  # 긴급 청산 활성화
     "auto_grid_count": True, # 그리드 개수 자동 계산
@@ -93,8 +93,301 @@ default_config = {
     "grid_count": "10",
     "period": "4시간",
     "target_profit_percent": "",
-    "demo_mode": 1
+    "demo_mode": 1,
+    "use_custom_range": False,  # 사용자 지정 가격 범위 사용
+    "custom_high_price": "",    # 상한선
+    "custom_low_price": "",     # 하한선
+    "advanced_grid_trading": True,  # 고급 그리드 거래 활성화
+    "grid_confirmation_buffer": 0.1,  # 그리드 확인 버퍼 (%)
+    "fee_rate": 0.0005,  # 거래 수수료율 (0.05%)
+    "auto_trading_mode": False,  # 완전 자동 거래 모드
+    "risk_mode": "보수적",  # 리스크 모드 (보수적, 안정적, 공격적, 극공격적)
+    "auto_update_interval": 60,  # 자동 업데이트 간격 (분)
+    "performance_tracking": True,  # 실적 추적 활성화
+    "auto_optimization": True  # 자동 최적화 활성화
 }
+
+# 완전 자동 거래 시스템
+class AutoTradingSystem:
+    def __init__(self):
+        self.risk_profiles = {
+            "보수적": {
+                "max_grid_count": 15,
+                "max_investment_ratio": 0.3,  # 총 자산의 30%만 투자
+                "panic_threshold": -3.0,  # 3% 하락시 급락 감지
+                "stop_loss_threshold": -5.0,  # 5% 손절
+                "trailing_stop_percent": 2.0,  # 2% 트레일링 스탑
+                "grid_confirmation_buffer": 0.2,  # 확인 버퍼 크게
+                "rebalance_threshold": 0.05  # 5% 변동시 리밸런싱
+            },
+            "안정적": {
+                "max_grid_count": 20,
+                "max_investment_ratio": 0.5,
+                "panic_threshold": -5.0,
+                "stop_loss_threshold": -8.0,
+                "trailing_stop_percent": 3.0,
+                "grid_confirmation_buffer": 0.15,
+                "rebalance_threshold": 0.08
+            },
+            "공격적": {
+                "max_grid_count": 30,
+                "max_investment_ratio": 0.7,
+                "panic_threshold": -7.0,
+                "stop_loss_threshold": -12.0,
+                "trailing_stop_percent": 4.0,
+                "grid_confirmation_buffer": 0.1,
+                "rebalance_threshold": 0.12
+            },
+            "극공격적": {
+                "max_grid_count": 50,
+                "max_investment_ratio": 0.9,
+                "panic_threshold": -10.0,
+                "stop_loss_threshold": -15.0,
+                "trailing_stop_percent": 5.0,
+                "grid_confirmation_buffer": 0.05,
+                "rebalance_threshold": 0.15
+            }
+        }
+        
+        self.performance_data = {
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "total_profit": 0.0,
+            "max_drawdown": 0.0,
+            "last_optimization": None,
+            "hourly_performance": []
+        }
+    
+    def get_risk_settings(self, risk_mode):
+        """리스크 모드에 따른 설정 반환"""
+        return self.risk_profiles.get(risk_mode, self.risk_profiles["안정적"])
+    
+    def analyze_performance(self, trades_data):
+        """거래 실적 분석"""
+        if not trades_data:
+            return {"status": "insufficient_data"}
+        
+        # 최근 24시간 거래 분석
+        recent_trades = [t for t in trades_data if self._is_recent_trade(t, 24)]
+        
+        if len(recent_trades) < 5:
+            return {"status": "insufficient_recent_data"}
+        
+        win_rate = len([t for t in recent_trades if t.get('profit', 0) > 0]) / len(recent_trades)
+        avg_profit = sum(t.get('profit', 0) for t in recent_trades) / len(recent_trades)
+        total_profit = sum(t.get('profit', 0) for t in recent_trades)
+        
+        return {
+            "status": "success",
+            "win_rate": win_rate,
+            "avg_profit": avg_profit,
+            "total_profit": total_profit,
+            "trade_count": len(recent_trades),
+            "recommendation": self._get_recommendation(win_rate, avg_profit)
+        }
+    
+    def _is_recent_trade(self, trade, hours):
+        """최근 거래인지 확인"""
+        try:
+            from datetime import datetime, timedelta
+            trade_time = datetime.strptime(trade.get('time', ''), '%Y-%m-%d %H:%M:%S')
+            return datetime.now() - trade_time < timedelta(hours=hours)
+        except:
+            return False
+    
+    def _get_recommendation(self, win_rate, avg_profit):
+        """실적 기반 추천"""
+        if win_rate > 0.7 and avg_profit > 1000:
+            return "increase_aggression"  # 공격성 증가
+        elif win_rate < 0.4 or avg_profit < -500:
+            return "decrease_aggression"  # 공격성 감소
+        else:
+            return "maintain"  # 현재 유지
+    
+    def optimize_parameters(self, current_config, performance_analysis):
+        """실적 기반 파라미터 자동 최적화"""
+        if performance_analysis["status"] != "success":
+            return current_config
+        
+        optimized_config = current_config.copy()
+        recommendation = performance_analysis["recommendation"]
+        current_risk = current_config.get("risk_mode", "안정적")
+        
+        # 리스크 모드 자동 조정
+        risk_modes = ["보수적", "안정적", "공격적", "극공격적"]
+        current_index = risk_modes.index(current_risk) if current_risk in risk_modes else 1
+        
+        if recommendation == "increase_aggression" and current_index < 3:
+            new_risk_mode = risk_modes[current_index + 1]
+            optimized_config["risk_mode"] = new_risk_mode
+            print(f"실적 우수로 리스크 모드 상향 조정: {current_risk} → {new_risk_mode}")
+        elif recommendation == "decrease_aggression" and current_index > 0:
+            new_risk_mode = risk_modes[current_index - 1]
+            optimized_config["risk_mode"] = new_risk_mode
+            print(f"실적 부진으로 리스크 모드 하향 조정: {current_risk} → {new_risk_mode}")
+        
+        # 리스크 프로필에 따른 설정 적용
+        risk_settings = self.get_risk_settings(optimized_config["risk_mode"])
+        optimized_config.update({
+            "max_grid_count": risk_settings["max_grid_count"],
+            "panic_threshold": risk_settings["panic_threshold"],
+            "stop_loss_threshold": risk_settings["stop_loss_threshold"],
+            "trailing_stop_percent": risk_settings["trailing_stop_percent"],
+            "grid_confirmation_buffer": risk_settings["grid_confirmation_buffer"]
+        })
+        
+        # 승률에 따른 세부 조정
+        win_rate = performance_analysis["win_rate"]
+        if win_rate > 0.8:  # 매우 높은 승률
+            optimized_config["grid_confirmation_buffer"] *= 0.8  # 버퍼 감소로 더 적극적
+        elif win_rate < 0.3:  # 매우 낮은 승률
+            optimized_config["grid_confirmation_buffer"] *= 1.5  # 버퍼 증가로 더 신중
+        
+        optimized_config["last_optimization"] = datetime.now().isoformat()
+        return optimized_config
+
+# 글로벌 자동 거래 시스템 인스턴스
+auto_trading_system = AutoTradingSystem()
+
+# 자동 최적화 스케줄러
+class AutoOptimizationScheduler:
+    def __init__(self):
+        self.last_optimization = None
+        self.optimization_thread = None
+        self.stop_optimization = False
+        
+    def start_auto_optimization(self, update_callback):
+        """자동 최적화 스레드 시작"""
+        if self.optimization_thread and self.optimization_thread.is_alive():
+            return
+            
+        self.stop_optimization = False
+        self.optimization_thread = threading.Thread(
+            target=self._optimization_worker, 
+            args=(update_callback,), 
+            daemon=True
+        )
+        self.optimization_thread.start()
+        
+    def stop_auto_optimization(self):
+        """자동 최적화 스레드 중지"""
+        self.stop_optimization = True
+        if self.optimization_thread:
+            self.optimization_thread.join(timeout=5)
+    
+    def _optimization_worker(self, update_callback):
+        """자동 최적화 작업자"""
+        while not self.stop_optimization:
+            try:
+                # 설정에서 간격 확인
+                interval_minutes = config.get('auto_update_interval', 60)
+                
+                # 간격만큼 대기 (10초씩 체크하여 중단 신호 확인)
+                for _ in range(int(interval_minutes * 6)):  # 60분 = 360 * 10초
+                    if self.stop_optimization:
+                        return
+                    time.sleep(10)
+                
+                # 자동 거래 모드가 활성화된 경우에만 최적화 실행
+                if config.get('auto_trading_mode', False) and config.get('auto_optimization', True):
+                    self._perform_optimization(update_callback)
+                    
+            except Exception as e:
+                print(f"자동 최적화 오류: {e}")
+                time.sleep(300)  # 오류 발생시 5분 대기
+    
+    def _perform_optimization(self, update_callback):
+        """실제 최적화 수행"""
+        try:
+            print("자동 최적화 시작...")
+            
+            # 거래 로그 데이터 로드
+            trades_data = self._load_recent_trades()
+            
+            # 실적 분석
+            performance = auto_trading_system.analyze_performance(trades_data)
+            
+            if performance["status"] == "success":
+                # 파라미터 최적화
+                optimized_config = auto_trading_system.optimize_parameters(config, performance)
+                
+                # 설정 업데이트
+                if optimized_config != config:
+                    config.update(optimized_config)
+                    save_config(config)
+                    
+                    # UI 업데이트 콜백 호출
+                    if update_callback:
+                        update_callback(config)
+                    
+                    # 최적화 결과 로그
+                    self._log_optimization_result(performance, optimized_config)
+                    
+                    # 카카오 알림
+                    if config.get('kakao_enabled', True):
+                        self._send_optimization_notification(performance, optimized_config)
+                else:
+                    print("최적화 결과 변경사항 없음")
+            else:
+                print(f"최적화 건너뛰기: {performance['status']}")
+                
+            self.last_optimization = datetime.now()
+            
+        except Exception as e:
+            print(f"최적화 수행 중 오류: {e}")
+    
+    def _load_recent_trades(self):
+        """최근 거래 데이터 로드"""
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            all_trades = []
+            for ticker_trades in data.values():
+                for trade in ticker_trades:
+                    # 매수/매도 쌍을 찾아 수익 계산
+                    if 'profit' not in trade:
+                        trade['profit'] = self._calculate_trade_profit(trade)
+                    all_trades.append(trade)
+            
+            return all_trades
+        except:
+            return []
+    
+    def _calculate_trade_profit(self, trade):
+        """거래별 수익 계산"""
+        # 간단한 수익 추정 (실제로는 매수/매도 쌍을 매칭해야 함)
+        action = trade.get('action', '')
+        if '매수' in action:
+            return 0  # 매수는 수익 0
+        elif '매도' in action:
+            # 매도는 평균 수익률 가정 (실제 구현시 더 정확하게)
+            return 1000  # 임시값
+        return 0
+    
+    def _log_optimization_result(self, performance, new_config):
+        """최적화 결과 로그"""
+        risk_mode = new_config.get('risk_mode', '알 수 없음')
+        win_rate = performance.get('win_rate', 0) * 100
+        total_profit = performance.get('total_profit', 0)
+        
+        log_msg = f"자동최적화 완료 - 리스크모드: {risk_mode}, 승률: {win_rate:.1f}%, 수익: {total_profit:,.0f}원"
+        print(log_msg)
+    
+    def _send_optimization_notification(self, performance, new_config):
+        """최적화 알림 발송"""
+        try:
+            risk_mode = new_config.get('risk_mode', '알 수 없음')
+            win_rate = performance.get('win_rate', 0) * 100
+            
+            message = f"🤖 자동최적화 완료\n리스크 모드: {risk_mode}\n승률: {win_rate:.1f}%"
+            send_kakao_message(message)
+        except:
+            pass
+
+# 글로벌 자동 최적화 스케줄러 인스턴스
+auto_scheduler = AutoOptimizationScheduler()
 
 def save_trading_state(ticker, positions, demo_mode):
     """현재 포지션 상태를 파일에 저장"""
@@ -304,7 +597,7 @@ def log_trade(ticker, action, price):
         return None
 
 # 급락 감지 및 대응 전략
-def detect_panic_selling(ticker, current_price, previous_prices, threshold_percent=-5.0):
+def detect_panic_selling(current_price, previous_prices, threshold_percent=-5.0):
     """급락 상황 감지"""
     if len(previous_prices) < 10:  # 최소 10개 데이터 필요
         return False
@@ -315,7 +608,22 @@ def detect_panic_selling(ticker, current_price, previous_prices, threshold_perce
     
     return price_change_percent <= threshold_percent
 
-def calculate_dynamic_grid(ticker, base_low, base_high, current_price, panic_mode=False):
+# 향상된 가격 범위 계산 함수
+def calculate_enhanced_price_range(ticker, period, use_custom_range=False, custom_high=None, custom_low=None):
+    """향상된 가격 범위 계산 (사용자 지정 범위 및 자동 그리드 개수 고려)"""
+    if use_custom_range and custom_high and custom_low:
+        try:
+            high_price = float(custom_high)
+            low_price = float(custom_low)
+            if high_price > low_price:
+                return high_price, low_price
+        except (ValueError, TypeError):
+            pass
+    
+    # 기존 범위 계산 로직 사용
+    return calculate_price_range(ticker, period)
+
+def calculate_dynamic_grid(base_low, base_high, current_price, panic_mode=False):
     """동적 그리드 계산 (급락장 대응)"""
     if panic_mode:
         # 급락장에서는 더 조밀한 그리드와 현재가 중심의 범위 설정
@@ -425,46 +733,93 @@ def calculate_price_range(ticker, period):
         print(f"가격 범위 계산 오류: {e}")
         return None, None
 
-def calculate_optimal_grid_count(high_price, low_price, target_profit_percent, fee_rate=0.0005):
+def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, investment_amount=1000000):
     """
-    가격 범위, 목표 수익률, 수수료를 고려하여 최적의 그리드 개수를 계산
+    가격 범위와 거래 수수료를 고려하여 최적의 그리드 개수를 자동 계산
     """
-    if low_price <= 0:
-        return 10  # 기본값
+    if low_price <= 0 or high_price <= low_price:
+        return 15  # 기본값
 
     # 전체 가격 범위 백분율
     price_range_percent = ((high_price - low_price) / low_price) * 100
 
-    # 매수/매도 왕복 수수료율 (0.05% * 2 = 0.1%)
-    round_trip_fee_percent = (2 * fee_rate) * 100
-
-    # 그리드당 필요한 최소 가격 상승 비율 (수수료 커버 + 최소 이익)
-    # (1 + fee_rate) / (1 - fee_rate) - 1
-    min_price_increase_factor_for_profit = (1 + fee_rate) / (1 - fee_rate)
-    min_price_increase_percent_for_profit = (min_price_increase_factor_for_profit - 1) * 100
-
-    # 여기에 추가적인 목표 이익을 더함 (예: 0.05% 추가 이익)
-    # 이 값은 각 그리드 거래가 최소한 이만큼의 이익을 내야 함을 의미
-    effective_min_profit_per_grid_percent = min_price_increase_percent_for_profit + 0.05
-
-    # 전체 가격 범위에서 이 최소 수익률을 몇 번 달성할 수 있는지 계산
-    # 그리드 개수는 (전체 가격 범위 백분율 / 그리드당 유효 최소 수익률)
-    if effective_min_profit_per_grid_percent <= 0: # 0으로 나누는 것 방지
-        return 10 # 안전 기본값
-
-    calculated_grid_count = price_range_percent / effective_min_profit_per_grid_percent
-
-    # 그리드 개수는 정수여야 하며, 너무 많거나 적지 않도록 제한
-    # 최소 3개, 최대는 설정값 따름
-    final_grid_count = max(3, min(config.get('max_grid_count', 50), int(round(calculated_grid_count))))
+    # 그리드당 최소 수익률 (수수료 2배 + 0.1% 추가 이익)
+    min_profit_per_grid = (fee_rate * 2 + 0.001) * 100
     
-    # 가격 범위가 너무 작아서 계산된 그리드 개수가 3개 미만으로 나오면,
-    # 최소 3개 그리드를 유지하되, 각 그리드 간격이 수수료를 커버하는지 확인
-    # (이 부분은 그리드 생성 로직에서 처리될 수 있음)
-    if final_grid_count < 3:
-        return 3
+    # 이론적 최대 그리드 개수
+    max_possible_grids = price_range_percent / min_profit_per_grid
+    
+    # 투자금액을 고려한 그리드 개수 조정
+    min_investment_per_grid = 50000  # 격당 최소 투자금 5만원
+    max_grids_by_investment = investment_amount / min_investment_per_grid
+    
+    # 최종 그리드 개수 결정
+    optimal_grids = min(max_possible_grids, max_grids_by_investment)
+    optimal_grids = max(10, min(50, int(optimal_grids)))  # 10~50 개 제한
+    
+    return optimal_grids
 
-    return final_grid_count
+def calculate_optimal_grid_count(high_price, low_price, target_profit_percent=None, fee_rate=0.0005):
+    """
+    기존 호환성을 위한 래퍼 함수
+    """
+    return calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate)
+
+# 고급 그리드 거래 상태 추적
+class AdvancedGridState:
+    def __init__(self):
+        self.pending_buy_orders = {}   # 대기 중인 매수 주문
+        self.pending_sell_orders = {}  # 대기 중인 매도 주문
+        self.price_history = []        # 가격 히스토리 (트렌드 분석용)
+        self.last_grid_action = None   # 마지막 그리드 액션
+        
+    def add_price_history(self, price):
+        self.price_history.append(price)
+        if len(self.price_history) > 20:  # 최근 20개만 유지
+            self.price_history.pop(0)
+    
+    def get_trend_direction(self):
+        """가격 트렌드 방향 판단 (1: 상승, -1: 하락, 0: 횡보)"""
+        if len(self.price_history) < 5:
+            return 0
+        
+        recent_prices = self.price_history[-5:]
+        if all(recent_prices[i] > recent_prices[i-1] for i in range(1, len(recent_prices))):
+            return 1  # 상승 트렌드
+        elif all(recent_prices[i] < recent_prices[i-1] for i in range(1, len(recent_prices))):
+            return -1  # 하락 트렌드
+        return 0  # 횡보
+
+def check_advanced_grid_conditions(current_price, grid_price, action_type, grid_state, buffer_percent=0.1):
+    """
+    고급 그리드 거래 조건 확인
+    - 하락시 그리드에서 바로 매수하지 않고, 트렌드 확인 후 상승시 매수
+    - 상승시 그리드에서 바로 매도하지 않고, 트렌드 확인 후 하락시 매도
+    """
+    trend = grid_state.get_trend_direction()
+    buffer = grid_price * (buffer_percent / 100)
+    
+    if action_type == "buy":
+        # 매수 조건: 가격이 그리드 하단 근처이고 상승 트렌드일 때
+        at_grid_level = current_price <= (grid_price + buffer)
+        if at_grid_level:
+            if trend >= 0:  # 상승 또는 횡보 트렌드
+                return True, "buy_confirmed"
+            else:
+                return False, "buy_pending"  # 하락 트렌드 시 대기
+        return False, "no_action"
+        
+    elif action_type == "sell":
+        # 매도 조건: 가격이 그리드 상단 근처이고 하락 트렌드일 때
+        at_grid_level = current_price >= (grid_price - buffer)
+        if at_grid_level:
+            if trend <= 0:  # 하락 또는 횡보 트렌드
+                return True, "sell_confirmed"
+            else:
+                return False, "sell_pending"  # 상승 트렌드 시 대기
+        return False, "no_action"
+    
+    return False, "invalid_action"
 
 # 차트 데이터 가져오기
 def get_chart_data(ticker, period):
@@ -672,8 +1027,15 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             full_log['ticker'] = ticker
             update_gui('log', full_log)
 
-    # 가격 범위 계산
-    high_price, low_price = calculate_price_range(ticker, period)
+    # 향상된 가격 범위 계산 (사용자 지정 범위 고려)
+    use_custom_range = config.get('use_custom_range', False)
+    custom_high = config.get('custom_high_price', '')
+    custom_low = config.get('custom_low_price', '')
+    
+    high_price, low_price = calculate_enhanced_price_range(
+        ticker, period, use_custom_range, custom_high, custom_low
+    )
+    
     if high_price is None or low_price is None:
         log_and_update('오류', '가격 범위 계산 실패')
         update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
@@ -684,6 +1046,37 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         log_and_update('오류', '시작 가격 조회 실패')
         update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
         return
+
+    # 자동 거래 모드에서 리스크 설정 적용
+    if config.get('auto_trading_mode', False):
+        risk_settings = auto_trading_system.get_risk_settings(config.get('risk_mode', '안정적'))
+        
+        # 투자금액 조정 (리스크에 따라)
+        max_investment_ratio = risk_settings['max_investment_ratio']
+        adjusted_investment = total_investment * max_investment_ratio
+        
+        log_and_update('자동모드', f"리스크 모드: {config.get('risk_mode')}, 투자비율: {max_investment_ratio*100:.0f}%")
+        
+        # 그리드 개수를 리스크 설정에 따라 제한
+        max_grids = risk_settings['max_grid_count']
+        if grid_count > max_grids:
+            grid_count = max_grids
+            log_and_update('리스크조정', f"그리드 개수 제한: {max_grids}개")
+        
+        # 수수료 및 버퍼 설정 업데이트
+        config['grid_confirmation_buffer'] = risk_settings['grid_confirmation_buffer']
+        config['panic_threshold'] = risk_settings['panic_threshold']
+        config['stop_loss_threshold'] = risk_settings['stop_loss_threshold']
+        config['trailing_stop_percent'] = risk_settings['trailing_stop_percent']
+    
+    # 자동 그리드 개수 계산 (설정에 따라)
+    if config.get('auto_grid_count', True):
+        grid_count = calculate_auto_grid_count_enhanced(
+            high_price, low_price, 
+            config.get('fee_rate', 0.0005), 
+            total_investment
+        )
+        log_and_update('자동계산', f"최적 그리드 개수: {grid_count}개")
 
     log_and_update('시작', f"{period} 범위: {low_price:,.0f}~{high_price:,.0f}")
     
@@ -697,9 +1090,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         price_level = low_price + (price_gap * i)
         grid_levels.append(price_level)
     
+    # 고급 그리드 상태 초기화
+    advanced_grid_state = AdvancedGridState()
+    
     log_and_update('설정', f"그리드 간격: {price_gap:,.0f}원, 격당투자: {amount_per_grid:,.0f}원")
 
-    fee_rate = 0.0005
+    fee_rate = config.get('fee_rate', 0.0005)
     previous_prices = []  # 급락 감지용 이전 가격들
     panic_mode = False
 
@@ -795,19 +1191,22 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         update_gui('price', f"현재가: {price:,.0f}원", "Black.TLabel")
         update_gui('running_time', f"운영시간: {running_time_str}")
         
-        # 가격 히스토리 업데이트 (급락 감지용)
+        # 가격 히스토리 업데이트 (급락 감지용 + 고급 그리드용)
         previous_prices.append(price)
         if len(previous_prices) > 30:  # 최근 30개만 유지
             previous_prices.pop(0)
         
+        # 고급 그리드 상태 업데이트
+        advanced_grid_state.add_price_history(price)
+        
         # 급락 상황 감지
-        new_panic_mode = detect_panic_selling(ticker, price, previous_prices, config.get("panic_threshold", -5.0))
+        new_panic_mode = detect_panic_selling(price, previous_prices, config.get("panic_threshold", -5.0))
         if new_panic_mode and not panic_mode:
             log_and_update('급락감지', '급락 대응 모드 활성화')
             send_kakao_message(f"{ticker} 급락 감지! 대응 모드 활성화")
             
             # 동적 그리드 재계산
-            new_low, new_high = calculate_dynamic_grid(ticker, low_price, high_price, price, True)
+            new_low, new_high = calculate_dynamic_grid(low_price, high_price, price, True)
             new_price_gap = (new_high - new_low) / grid_count
             grid_levels = [new_low + (new_price_gap * i) for i in range(grid_count + 1)]
             update_gui('chart_data', new_high, new_low, grid_levels)
@@ -969,6 +1368,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             # 긴급 청산 체크
             held_value = sum(pos['quantity'] * price for pos in demo_positions)
             total_value = demo_balance + held_value
+            
+            # 코인 보유량이 0일 때 평가수익도 0으로 처리
+            coin_quantity = sum(pos['quantity'] for pos in demo_positions)
+            if coin_quantity == 0:
+                held_value = 0  # 보유 코인이 없으면 코인가치도 0
+            
             profit_percent = (total_value - start_balance) / start_balance * 100 if start_balance > 0 else 0
             
             if (config.get("emergency_exit_enabled", True) and 
@@ -995,15 +1400,26 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 break
                 
             profit = total_value - start_balance
+            
+            # 코인 보유량이 0일 때 평가수익도 현금 잔고 기준으로만 계산
+            if coin_quantity == 0:
+                profit = demo_balance - start_balance  # 현금 잔고 - 시작 잔고
+                total_value = demo_balance  # 총 자산도 현금만
+                
             realized_profit_percent = (total_realized_profit / total_investment) * 100 if total_investment > 0 else 0
-            coin_quantity = sum(pos['quantity'] for pos in demo_positions)
             
             update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent)
 
-            # 차트 상태 업데이트
+            # 고급 그리드 차트 상태 업데이트
             positions = demo_positions
-            pending_buy_info = {'is_pending': buy_pending, 'grid_index': lowest_grid_to_buy}
-            update_gui('chart_state', positions, pending_buy_info)
+            grid_status = {
+                'pending_buys': advanced_grid_state.pending_buy_orders,
+                'pending_sells': advanced_grid_state.pending_sell_orders,
+                'trend': advanced_grid_state.get_trend_direction(),
+                'current_price': price,
+                'grid_levels': grid_levels
+            }
+            update_gui('chart_state', positions, grid_status)
             
         else:
             # 실제 거래 모드 로직 (생략 - 데모와 유사하게 수정 필요) 
@@ -1109,7 +1525,79 @@ def open_settings_window(parent, current_config, update_callback, grid_recalc_ca
     limit_order_buffer_entry.insert(0, current_config.get('limit_order_buffer', 0.2))
     limit_order_buffer_entry.grid(row=1, column=1, padx=5, pady=5)
 
-    # 4. 알림 설정 탭
+    # 4. 고급 그리드 설정 탭
+    advanced_frame = ttk.Frame(notebook)
+    notebook.add(advanced_frame, text='고급 그리드')
+    
+    use_custom_range_var = tk.BooleanVar(value=current_config.get('use_custom_range', False))
+    ttk.Checkbutton(advanced_frame, text="사용자 지정 가격 범위 사용", variable=use_custom_range_var).grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
+    
+    ttk.Label(advanced_frame, text="상한선 (원):").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+    custom_high_entry = ttk.Entry(advanced_frame)
+    custom_high_entry.insert(0, current_config.get('custom_high_price', ''))
+    custom_high_entry.grid(row=1, column=1, padx=5, pady=5)
+    
+    ttk.Label(advanced_frame, text="하한선 (원):").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    custom_low_entry = ttk.Entry(advanced_frame)
+    custom_low_entry.insert(0, current_config.get('custom_low_price', ''))
+    custom_low_entry.grid(row=2, column=1, padx=5, pady=5)
+    
+    advanced_grid_var = tk.BooleanVar(value=current_config.get('advanced_grid_trading', True))
+    ttk.Checkbutton(advanced_frame, text="고급 그리드 거래 활성화", variable=advanced_grid_var).grid(row=3, column=0, columnspan=2, sticky='w', padx=5)
+    
+    ttk.Label(advanced_frame, text="그리드 확인 버퍼 (%):").grid(row=4, column=0, sticky='w', padx=5, pady=5)
+    grid_buffer_entry = ttk.Entry(advanced_frame)
+    grid_buffer_entry.insert(0, current_config.get('grid_confirmation_buffer', 0.1))
+    grid_buffer_entry.grid(row=4, column=1, padx=5, pady=5)
+    
+    ttk.Label(advanced_frame, text="거래 수수료율 (%):").grid(row=5, column=0, sticky='w', padx=5, pady=5)
+    fee_rate_entry = ttk.Entry(advanced_frame)
+    fee_rate_entry.insert(0, current_config.get('fee_rate', 0.0005) * 100)  # 백분율로 표시
+    fee_rate_entry.grid(row=5, column=1, padx=5, pady=5)
+
+    # 5. 자동 거래 설정 탭
+    auto_frame = ttk.Frame(notebook)
+    notebook.add(auto_frame, text='자동 거래')
+    
+    auto_trading_var = tk.BooleanVar(value=current_config.get('auto_trading_mode', False))
+    ttk.Checkbutton(auto_frame, text="완전 자동 거래 모드 활성화", variable=auto_trading_var).grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
+    
+    ttk.Label(auto_frame, text="리스크 모드:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+    risk_mode_var = tk.StringVar(value=current_config.get('risk_mode', '안정적'))
+    risk_mode_combo = ttk.Combobox(auto_frame, textvariable=risk_mode_var, 
+                                  values=["보수적", "안정적", "공격적", "극공격적"], 
+                                  state="readonly")
+    risk_mode_combo.grid(row=1, column=1, padx=5, pady=5)
+    
+    ttk.Label(auto_frame, text="자동 업데이트 간격 (분):").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    update_interval_entry = ttk.Entry(auto_frame)
+    update_interval_entry.insert(0, current_config.get('auto_update_interval', 60))
+    update_interval_entry.grid(row=2, column=1, padx=5, pady=5)
+    
+    performance_tracking_var = tk.BooleanVar(value=current_config.get('performance_tracking', True))
+    ttk.Checkbutton(auto_frame, text="실적 추적 활성화", variable=performance_tracking_var).grid(row=3, column=0, columnspan=2, sticky='w', padx=5)
+    
+    auto_optimization_var = tk.BooleanVar(value=current_config.get('auto_optimization', True))
+    ttk.Checkbutton(auto_frame, text="자동 최적화 활성화", variable=auto_optimization_var).grid(row=4, column=0, columnspan=2, sticky='w', padx=5)
+    
+    # 리스크 모드 설명 라벨
+    risk_info_label = ttk.Label(auto_frame, text="", foreground="gray")
+    risk_info_label.grid(row=5, column=0, columnspan=2, padx=5, pady=10, sticky='w')
+    
+    def update_risk_info(*args):
+        """리스크 모드별 설명 업데이트"""
+        risk_mode = risk_mode_var.get()
+        if risk_mode in auto_trading_system.risk_profiles:
+            profile = auto_trading_system.risk_profiles[risk_mode]
+            info_text = (f"투자비율: {profile['max_investment_ratio']*100:.0f}%, "
+                        f"최대그리드: {profile['max_grid_count']}개, "
+                        f"손절선: {profile['stop_loss_threshold']}%")
+            risk_info_label.config(text=info_text)
+    
+    risk_mode_var.trace('w', update_risk_info)
+    update_risk_info()  # 초기값 설정
+
+    # 6. 알림 설정 탭
     notification_frame = ttk.Frame(notebook)
     notebook.add(notification_frame, text='알림 설정')
 
@@ -1134,6 +1622,19 @@ def open_settings_window(parent, current_config, update_callback, grid_recalc_ca
             # Order
             current_config['use_limit_orders'] = use_limit_orders_var.get()
             current_config['limit_order_buffer'] = float(limit_order_buffer_entry.get())
+            # Advanced Grid
+            current_config['use_custom_range'] = use_custom_range_var.get()
+            current_config['custom_high_price'] = custom_high_entry.get()
+            current_config['custom_low_price'] = custom_low_entry.get()
+            current_config['advanced_grid_trading'] = advanced_grid_var.get()
+            current_config['grid_confirmation_buffer'] = float(grid_buffer_entry.get())
+            current_config['fee_rate'] = float(fee_rate_entry.get()) / 100  # 백분율에서 소수로 변환
+            # Auto Trading
+            current_config['auto_trading_mode'] = auto_trading_var.get()
+            current_config['risk_mode'] = risk_mode_var.get()
+            current_config['auto_update_interval'] = int(update_interval_entry.get())
+            current_config['performance_tracking'] = performance_tracking_var.get()
+            current_config['auto_optimization'] = auto_optimization_var.get()
             # Notification
             current_config['tts_enabled'] = tts_enabled_var.get()
             current_config['kakao_enabled'] = kakao_enabled_var.get()
@@ -1299,6 +1800,9 @@ def start_dashboard():
         global config, upbit
         config = new_config
         initialize_upbit()
+        # 자동거래 상태 업데이트
+        if 'update_auto_status' in globals():
+            update_auto_status()
 
     style = ttk.Style()
     style.theme_use('clam')
@@ -1329,8 +1833,59 @@ def start_dashboard():
     top_frame.grid_columnconfigure(1, weight=1)
 
     # 코인 선택 및 현황
+    # 자동 거래 상태 프레임 추가
+    auto_status_frame = ttk.LabelFrame(top_frame, text="자동 거래 상태")
+    auto_status_frame.grid(row=0, column=0, sticky='ew', padx=(0, 4), pady=(0, 5))
+    
+    auto_mode_label = ttk.Label(auto_status_frame, text="자동 모드: 비활성", foreground="red")
+    auto_mode_label.grid(row=0, column=0, padx=5, pady=2, sticky='w')
+    
+    risk_mode_label = ttk.Label(auto_status_frame, text=f"리스크: {config.get('risk_mode', '안정적')}", foreground="blue")
+    risk_mode_label.grid(row=0, column=1, padx=5, pady=2, sticky='w')
+    
+    last_optimization_label = ttk.Label(auto_status_frame, text="최근 최적화: -", foreground="gray")
+    last_optimization_label.grid(row=0, column=2, padx=5, pady=2, sticky='w')
+    
+    def toggle_auto_mode():
+        """자동 거래 모드 토글"""
+        current = config.get('auto_trading_mode', False)
+        config['auto_trading_mode'] = not current
+        save_config(config)
+        update_auto_status()
+        
+        if config['auto_trading_mode']:
+            # 자동 최적화 시작
+            auto_scheduler.start_auto_optimization(update_config)
+            messagebox.showinfo("자동 모드", "자동 거래 모드가 활성화되었습니다.")
+        else:
+            # 자동 최적화 중지
+            auto_scheduler.stop_auto_optimization()
+            messagebox.showinfo("자동 모드", "자동 거래 모드가 비활성화되었습니다.")
+    
+    def update_auto_status():
+        """자동 거래 상태 업데이트"""
+        if config.get('auto_trading_mode', False):
+            auto_mode_label.config(text="자동 모드: 활성", foreground="green")
+        else:
+            auto_mode_label.config(text="자동 모드: 비활성", foreground="red")
+        
+        risk_mode_label.config(text=f"리스크: {config.get('risk_mode', '안정적')}")
+        
+        last_opt = config.get('last_optimization')
+        if last_opt:
+            try:
+                opt_time = datetime.fromisoformat(last_opt).strftime('%H:%M')
+                last_optimization_label.config(text=f"최근 최적화: {opt_time}")
+            except:
+                last_optimization_label.config(text="최근 최적화: -")
+    
+    auto_toggle_btn = ttk.Button(auto_status_frame, text="자동모드 ON/OFF", command=toggle_auto_mode)
+    auto_toggle_btn.grid(row=0, column=3, padx=5, pady=2)
+    
+    update_auto_status()  # 초기 상태 설정
+
     ticker_frame = ttk.LabelFrame(top_frame, text="코인 선택 및 현황")
-    ticker_frame.grid(row=0, column=0, sticky='nswe', padx=(0, 4))
+    ticker_frame.grid(row=1, column=0, sticky='nswe', padx=(0, 4))
     ticker_vars = {}
     status_labels, current_price_labels, running_time_labels = {}, {}, {}
     detail_labels = {}
@@ -1849,6 +2404,12 @@ def start_dashboard():
                 elif key == 'details':
                     cash, coin_qty, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent = args
                     
+                    # 코인 보유량이 0일 때 평가수익을 0으로 강제 설정
+                    if coin_qty == 0:
+                        held_value = 0
+                        profit = 0  # 평가수익 0으로 설정
+                        profit_percent = 0  # 평가수익률도 0으로 설정
+                    
                     profit_style = get_profit_color_style(profit)
                     realized_profit_style = get_profit_color_style(total_realized_profit)
 
@@ -1857,7 +2418,7 @@ def start_dashboard():
                     detail_labels[ticker]['realized_profit'].config(text=f"실현수익: {total_realized_profit:,.0f}원", style=realized_profit_style)
                     detail_labels[ticker]['realized_profit_rate'].config(text=f"({realized_profit_percent:+.2f}%)", style=realized_profit_style)
                     detail_labels[ticker]['cash'].config(text=f"현금: {cash:,.0f}원", style="Black.TLabel")
-                    detail_labels[ticker]['coin_qty'].config(text=f"{coin_qty:.6f}개", style="Black.TLabel")
+                    detail_labels[ticker]['coin_qty'].config(text=f"보유: {coin_qty:.6f}개", style="Black.TLabel")
                     detail_labels[ticker]['coin_value'].config(text=f"코인가치: {held_value:,.0f}원", style="Black.TLabel")
                     detail_labels[ticker]['total_value'].config(text=f"총자산: {total_value:,.0f}원", style="Blue.TLabel")
 
