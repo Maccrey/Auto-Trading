@@ -1034,7 +1034,7 @@ def has_trade_logs(ticker):
         return False
 
 # 개선된 그리드 트레이딩 로직
-def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent_str, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
+def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent_str, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data, should_resume=False):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
     start_time = datetime.now()
 
@@ -1180,25 +1180,44 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
         return
 
-    demo_positions = load_trading_state(ticker, True) # Load positions first
-
-    current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
-    invested_in_held_positions = sum(pos['quantity'] * pos['buy_price'] for pos in demo_positions)
-    
-    # Ensure total_investment is treated as the initial capital
-    initial_capital = float(total_investment) 
-    current_cash_balance = initial_capital - invested_in_held_positions
-    current_total_assets = current_cash_balance + current_held_assets_value
+    # 거래 재개 여부에 따른 데이터 로드
+    if should_resume:
+        demo_positions = load_trading_state(ticker, True) # Load positions first
+        current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
+        invested_in_held_positions = sum(pos['quantity'] * pos['buy_price'] for pos in demo_positions)
+        
+        # Ensure total_investment is treated as the initial capital
+        initial_capital = float(total_investment) 
+        current_cash_balance = initial_capital - invested_in_held_positions
+        current_total_assets = current_cash_balance + current_held_assets_value
+        
+        if demo_mode:
+            start_balance = current_total_assets
+            demo_balance = current_total_assets
+            if demo_positions:
+                log_and_update('정보', f'이어서 거래: {len(demo_positions)}개의 포지션을 복원했습니다.')
+                update_gui('action_status', 'waiting')
+            total_invested = 0
+    else:
+        # 새로운 거래 시작 - 기존 상태 초기화
+        demo_positions = []
+        save_trading_state(ticker, [], True)  # 빈 상태로 저장
+        current_held_assets_value = 0
+        invested_in_held_positions = 0
+        initial_capital = float(total_investment)
+        current_cash_balance = initial_capital
+        current_total_assets = initial_capital
+        
+        if demo_mode:
+            start_balance = current_total_assets
+            demo_balance = current_total_assets
+            log_and_update('정보', '새로운 거래를 시작합니다.')
+            update_gui('action_status', 'waiting')
+            total_invested = 0
 
     highest_value = current_total_assets  # 트레일링 스탑용 최고 자산 가치
     
-    if demo_mode:
-        start_balance = current_total_assets
-        demo_balance = current_total_assets
-        if demo_positions:
-            log_and_update('정보', f'{len(demo_positions)}개의 포지션을 복원했습니다.')
-        total_invested = 0
-    else:
+    if not demo_mode:
         if upbit is None:
             log_and_update('오류', '업비트 API 초기화 안됨')
             update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
@@ -2256,6 +2275,9 @@ def start_dashboard():
             messagebox.showwarning("경고", "거래할 코인을 선택해주세요.")
             return
 
+        # 이전 거래 상태 로드 확인
+        should_resume = load_previous_trading_state()
+
         try:
             # 현재 UI 설정값을 config에 저장
             config["total_investment"] = amount_entry.get()
@@ -2323,7 +2345,7 @@ def start_dashboard():
                         ticker, grid_count, total_investment, demo_mode,
                         target_profit_percent_str, period, stop_event, gui_queue,
                         total_profit_label, total_profit_rate_label,
-                        all_ticker_total_values, all_ticker_start_balances, profits_data
+                        all_ticker_total_values, all_ticker_start_balances, profits_data, should_resume
                     ),
                     daemon=True
                 )
@@ -2432,6 +2454,37 @@ def start_dashboard():
         all_ticker_total_values.clear()
         all_ticker_start_balances.clear()
         all_ticker_realized_profits.clear()
+        
+        # 차트 데이터 초기화
+        chart_data.clear()
+        
+        # 거래 상태 파일들 삭제
+        try:
+            for ticker in tickers:
+                state_file_path = f"trading_state_{ticker.replace('-', '_')}.json"
+                if os.path.exists(state_file_path):
+                    os.remove(state_file_path)
+                    
+            # 거래 로그 파일 초기화
+            if os.path.exists("trade_logs.json"):
+                with open("trade_logs.json", 'w', encoding='utf-8') as f:
+                    json.dump([], f, ensure_ascii=False, indent=2)
+                    
+            # 수익 데이터 파일 초기화
+            if os.path.exists("profits.json"):
+                with open("profits.json", 'w', encoding='utf-8') as f:
+                    json.dump({}, f, ensure_ascii=False, indent=2)
+                    
+        except Exception as e:
+            print(f"파일 삭제/초기화 오류: {e}")
+        
+        # 차트 새로고침 (그리드 리셋)
+        try:
+            current_period = period_combo.get()
+            for ticker in tickers:
+                update_chart(ticker, current_period)
+        except Exception as e:
+            print(f"차트 새로고침 오류: {e}")
 
         # Reset total profit labels
         total_profit_label.config(text="총 실현수익: 0원", style="Black.TLabel")
