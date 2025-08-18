@@ -1,0 +1,40 @@
+# 자동 그리드 트레이딩 봇 - 필수 라이브러리
+# Auto Grid Trading Bot - Required Libraries
+
+# 암호화폐 거래 API
+pyupbit==0.2.34
+
+# HTTP 요청
+requests==2.32.4
+
+# 데이터 처리 및 분석
+numpy==2.3.2
+pandas==2.3.1
+
+# 차트 및 시각화
+matplotlib==3.10.5
+
+# Excel 파일 처리
+xlsxwriter==3.2.5
+
+# TTS (Text-to-Speech)
+pyttsx3==2.99
+
+# JWT 토큰 처리 (카카오톡 알림용)
+PyJWT==2.10.1
+
+# 기타 유틸리티
+python-dateutil==2.9.0.post0
+pytz==2025.2
+
+# 웹소켓 (실시간 데이터용)
+websockets==15.0.1
+
+# 이미지 처리 (차트 관련)
+pillow==11.3.0
+
+# 기본 유틸리티
+certifi==2025.8.3
+charset-normalizer==3.4.2
+idna==3.10
+urllib3==2.5.0
