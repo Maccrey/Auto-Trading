@@ -166,23 +166,7 @@ def load_config():
 
 config = load_config()
 
-def update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data):
-    profits_data[ticker] = profits_data.get(ticker, 0) + profit_percent
-    with open('profits.json', 'w') as f:
-        json.dump(profits_data, f)
 
-    total_profit_percent = sum(profits_data.values())
-    total_profit_label.config(text=f"총 실현수익: {total_profit_percent:.2f}%")
-
-    # Calculate total profit rate based on all_ticker_total_values and all_ticker_start_balances
-    total_current_value = sum(all_ticker_total_values.values())
-    total_start_balance = sum(all_ticker_start_balances.values())
-
-    if total_start_balance > 0:
-        overall_profit_rate = ((total_current_value - total_start_balance) / total_start_balance) * 100
-        total_profit_rate_label.config(text=f"총 실현수익률: {overall_profit_rate:.2f}%")
-    else:
-        total_profit_rate_label.config(text="Overall Profit Rate: N/A")
 
 # 카카오톡 알림 API
 def send_kakao_message(message):
@@ -1026,7 +1010,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             # TODO: 실제 거래 로직 구현
             pass # 실제 거래 로직도 데모와 동일한 방식으로 log_and_update 및 update_gui('refresh_chart') 호출 필요
 
-        update_profit(ticker, profit_percent, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data)
+
         
         status, style = evaluate_status(profit_percent, True, panic_mode)
         update_gui('status', f"상태: {status}", style, True, panic_mode)
