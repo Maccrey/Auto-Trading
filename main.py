@@ -442,9 +442,9 @@ upbit = None
 
 # 매수/매도 개수 추적
 trade_counts = {
-    "KRW-BTC": {"buy": 0, "sell": 0},
-    "KRW-ETH": {"buy": 0, "sell": 0}, 
-    "KRW-XRP": {"buy": 0, "sell": 0}
+    "KRW-BTC": {"buy": 0, "sell": 0, "profitable_sell": 0},
+    "KRW-ETH": {"buy": 0, "sell": 0, "profitable_sell": 0}, 
+    "KRW-XRP": {"buy": 0, "sell": 0, "profitable_sell": 0}
 }
 
 def initialize_upbit():
@@ -1407,6 +1407,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     log_and_update("데모 매도", log_msg)
                     speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
+                    
+                    # 데모 모드에서도 매도 횟수 증가
+                    trade_counts[ticker]["sell"] += 1
+                    if net_profit > 0:  # 수익이 난 거래만 카운트
+                        trade_counts[ticker]["profitable_sell"] += 1
+                    
                     update_gui('refresh_chart')
                     continue # 다음 포지션으로
 
@@ -1447,6 +1453,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             log_and_update("데모 매도", log_msg)
                             speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
                             send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원")
+                            
+                            # 데모 모드에서도 매도 횟수 증가
+                            trade_counts[ticker]["sell"] += 1
+                            if net_profit > 0:  # 수익이 난 거래만 카운트
+                                trade_counts[ticker]["profitable_sell"] += 1
+                            
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
 
@@ -1957,7 +1969,8 @@ def start_dashboard():
             'coin_value': ttk.Label(ticker_frame, text="코인가치: 0원", style="Gray.TLabel"),
             'total_value': ttk.Label(ticker_frame, text="총자산: 0원", style="Gray.TLabel"),
             'buy_count': ttk.Label(ticker_frame, text="📈 매수: 0회", style="Gray.TLabel", font=('Helvetica', 8)),
-            'sell_count': ttk.Label(ticker_frame, text="📉 매도: 0회", style="Gray.TLabel", font=('Helvetica', 8))
+            'sell_count': ttk.Label(ticker_frame, text="📉 매도: 0회", style="Gray.TLabel", font=('Helvetica', 8)),
+            'profitable_sell_count': ttk.Label(ticker_frame, text="💰 수익거래: 0회", style="Gray.TLabel", font=('Helvetica', 8))
         }
         
         detail_labels[ticker]['profit'].grid(row=i*6+2, column=0, sticky='w', padx=3)
@@ -1968,8 +1981,9 @@ def start_dashboard():
         detail_labels[ticker]['coin_qty'].grid(row=i*6+3, column=1, sticky='w', padx=3)
         detail_labels[ticker]['coin_value'].grid(row=i*6+3, column=2, sticky='w', padx=3)
         detail_labels[ticker]['total_value'].grid(row=i*6+3, column=3, sticky='w', padx=3)
-        detail_labels[ticker]['buy_count'].grid(row=i*6+4, column=0, columnspan=2, sticky='w', padx=3)
-        detail_labels[ticker]['sell_count'].grid(row=i*6+4, column=2, columnspan=2, sticky='w', padx=3)
+        detail_labels[ticker]['buy_count'].grid(row=i*6+4, column=0, sticky='w', padx=3)
+        detail_labels[ticker]['sell_count'].grid(row=i*6+4, column=1, sticky='w', padx=3)
+        detail_labels[ticker]['profitable_sell_count'].grid(row=i*6+4, column=2, columnspan=2, sticky='w', padx=3)
         
         # 구분선
         if i < len(tickers) - 1:
@@ -2197,6 +2211,31 @@ def start_dashboard():
         log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
         log_tree.yview_moveto(1) # 항상 최신 로그가 보이도록 스크롤
 
+    def load_previous_trading_state():
+        """이전 거래 상태를 로드하여 이어서 거래할 수 있도록 함"""
+        try:
+            # 거래 상태 파일들이 존재하는지 확인
+            state_files_exist = False
+            for ticker in ["KRW-BTC", "KRW-ETH", "KRW-XRP"]:
+                state_file_path = f"trading_state_{ticker.replace('-', '_')}.json"
+                if os.path.exists(state_file_path):
+                    with open(state_file_path, 'r', encoding='utf-8') as f:
+                        state_data = json.load(f)
+                        if state_data.get('positions') or state_data.get('balance'):
+                            state_files_exist = True
+                            break
+            
+            if state_files_exist:
+                response = messagebox.askyesno(
+                    "거래 상태 복구", 
+                    "이전 거래 데이터가 발견되었습니다.\n이어서 거래하시겠습니까?\n\n'예'를 선택하면 기존 포지션과 잔고를 유지합니다.\n'아니오'를 선택하면 새로운 거래를 시작합니다."
+                )
+                return response
+            return False
+        except Exception as e:
+            print(f"거래 상태 로드 확인 오류: {e}")
+            return False
+
     def toggle_trading():
         """거래 시작/중지 로직 통합"""
         # 거래 중지 로직
@@ -2381,10 +2420,12 @@ def start_dashboard():
             detail_labels[ticker]['total_value'].config(text="총자산: 0원", style="Gray.TLabel")
             detail_labels[ticker]['buy_count'].config(text="📈 매수: 0회", style="Gray.TLabel")
             detail_labels[ticker]['sell_count'].config(text="📉 매도: 0회", style="Gray.TLabel")
+            detail_labels[ticker]['profitable_sell_count'].config(text="💰 수익거래: 0회", style="Gray.TLabel")
             
             # 매수/매도 개수 초기화
             trade_counts[ticker]["buy"] = 0
             trade_counts[ticker]["sell"] = 0
+            trade_counts[ticker]["profitable_sell"] = 0
 
 
         # Clear tickers and related data structures
@@ -2673,6 +2714,7 @@ def start_dashboard():
                     detail_labels[ticker]['total_value'].config(text=f"총자산: {total_value:,.0f}원", style="Blue.TLabel")
                     detail_labels[ticker]['buy_count'].config(text=f"📈 매수: {trade_counts[ticker]['buy']}회", style="Black.TLabel")
                     detail_labels[ticker]['sell_count'].config(text=f"📉 매도: {trade_counts[ticker]['sell']}회", style="Black.TLabel")
+                    detail_labels[ticker]['profitable_sell_count'].config(text=f"💰 수익거래: {trade_counts[ticker]['profitable_sell']}회", style="Green.TLabel")
 
                     all_ticker_total_values[ticker] = total_value
                     all_ticker_start_balances[ticker] = float(config.get("total_investment", "0")) 
