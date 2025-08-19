@@ -338,13 +338,46 @@ class AutoOptimizationScheduler:
                         self._send_optimization_notification(performance, optimized_config)
                 else:
                     print("최적화 결과 변경사항 없음")
+                    
+            # 수익권 포지션 자동 매도 처리 (활성 거래가 있는 경우)
+            if hasattr(self, 'active_tickers'):
+                for ticker in getattr(self, 'active_tickers', []):
+                    try:
+                        sold_qty, profit = check_and_sell_profitable_positions(ticker, demo_mode=True)
+                        if sold_qty > 0:
+                            korean_name = get_korean_coin_name(ticker)
+                            log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원")
+                            speak_async(f"{korean_name} 자동 수익 실현")
+                    except Exception as e:
+                        print(f"자동 매도 처리 오류 ({ticker}): {e}")
             else:
                 print(f"최적화 건너뛰기: {performance['status']}")
+                
+                # 실패해도 수익권 포지션 자동 매도는 수행
+                if hasattr(self, 'active_tickers'):
+                    for ticker in getattr(self, 'active_tickers', []):
+                        try:
+                            sold_qty, profit = check_and_sell_profitable_positions(ticker, demo_mode=True)
+                            if sold_qty > 0:
+                                korean_name = get_korean_coin_name(ticker)
+                                log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원")
+                        except Exception as e:
+                            print(f"자동 매도 처리 오류 ({ticker}): {e}")
                 
             self.last_optimization = datetime.now()
             
         except Exception as e:
             print(f"최적화 수행 중 오류: {e}")
+            # 오류 발생시에도 기본적인 수익 실현 기능은 수행
+            try:
+                current_investment = float(config.get('total_investment', 100000000))
+                updated_investment, total_profit = update_investment_with_profits(current_investment)
+                if total_profit > 0:
+                    config['total_investment'] = str(int(updated_investment))
+                    save_config(config)
+                    log_trade("AUTO_SYSTEM", "비상수익재투자", f"수익: +{total_profit:,.0f}원")
+            except:
+                pass
     
     def _load_recent_trades(self):
         """최근 거래 데이터 로드"""
@@ -528,6 +561,101 @@ def load_profits_data():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+
+def save_profits_data(profits_data):
+    """수익 데이터를 파일에 저장"""
+    try:
+        with open(profit_file, 'w', encoding='utf-8') as f:
+            json.dump(profits_data, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"수익 데이터 저장 오류: {e}")
+        return False
+
+def calculate_total_realized_profit():
+    """실현된 총 수익 계산"""
+    try:
+        profits_data = load_profits_data()
+        total_profit = 0
+        
+        for ticker, profit in profits_data.items():
+            if isinstance(profit, (int, float)):
+                total_profit += profit
+        
+        return total_profit
+    except Exception as e:
+        print(f"총 수익 계산 오류: {e}")
+        return 0
+
+def check_and_sell_profitable_positions(ticker, demo_mode=True):
+    """수익권 포지션 확인 및 자동 매도"""
+    try:
+        positions = load_trading_state(ticker, demo_mode)
+        if not positions:
+            return 0, 0  # 매도 수량, 수익금
+        
+        current_price = pyupbit.get_current_price(ticker)
+        if current_price is None:
+            return 0, 0
+        
+        total_sold_quantity = 0
+        total_profit = 0
+        remaining_positions = []
+        
+        for position in positions:
+            buy_price = position.get('buy_price', 0)
+            quantity = position.get('quantity', 0)
+            
+            # 현재 가격이 매수 가격보다 높으면 (수익권)
+            if current_price > buy_price:
+                # 매도 처리
+                sell_value = quantity * current_price
+                buy_value = quantity * buy_price
+                profit = sell_value - buy_value - (sell_value * 0.0005)  # 수수료 차감
+                
+                total_sold_quantity += quantity
+                total_profit += profit
+                
+                # 거래 로그 기록
+                log_trade(ticker, "수익 실현 매도", f"{current_price:,.0f}원 ({quantity:.6f}개) 수익: {profit:,.0f}원")
+                
+                korean_name = get_korean_coin_name(ticker)
+                speak_async(f"{korean_name} 수익 실현 매도 완료")
+                
+            else:
+                # 손실권은 유지
+                remaining_positions.append(position)
+        
+        # 남은 포지션 저장
+        save_trading_state(ticker, remaining_positions, demo_mode)
+        
+        # 수익 데이터 업데이트
+        if total_profit > 0:
+            profits_data = load_profits_data()
+            current_profit = profits_data.get(ticker, 0)
+            profits_data[ticker] = current_profit + total_profit
+            save_profits_data(profits_data)
+        
+        return total_sold_quantity, total_profit
+        
+    except Exception as e:
+        print(f"수익권 포지션 매도 오류: {e}")
+        return 0, 0
+
+def update_investment_with_profits(original_investment):
+    """수익금을 포함하여 투자금 재계산"""
+    try:
+        total_profit = calculate_total_realized_profit()
+        updated_investment = original_investment + total_profit
+        
+        if total_profit > 0:
+            log_trade("SYSTEM", "투자금 업데이트", f"기존: {original_investment:,.0f}원 + 수익: {total_profit:,.0f}원 = 신규: {updated_investment:,.0f}원")
+            speak_async(f"수익금 {total_profit:,.0f}원이 투자금에 포함되었습니다")
+        
+        return updated_investment, total_profit
+    except Exception as e:
+        print(f"투자금 업데이트 오류: {e}")
+        return original_investment, 0
 
 
 def export_to_excel(filename=None):
@@ -1158,20 +1286,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
     log_and_update('시작', f"{period} 범위: {low_price:,.0f}~{high_price:,.0f}")
     
-    # 그리드 간격 계산
-    price_gap = (high_price - low_price) / grid_count
-    amount_per_grid = total_investment / grid_count
-    
-    # 그리드 가격 레벨 생성
-    grid_levels = []
-    for i in range(grid_count + 1):
-        price_level = low_price + (price_gap * i)
-        grid_levels.append(price_level)
-    
     # 고급 그리드 상태 초기화
     advanced_grid_state = AdvancedGridState()
-    
-    log_and_update('설정', f"그리드 간격: {price_gap:,.0f}원, 격당투자: {amount_per_grid:,.0f}원")
 
     fee_rate = config.get('fee_rate', 0.0005)
     previous_prices = []  # 급락 감지용 이전 가격들
@@ -1186,21 +1302,68 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
     # 거래 재개 여부에 따른 데이터 로드
     if should_resume:
-        demo_positions = load_trading_state(ticker, True) # Load positions first
+        # 1단계: 수익권 포지션 자동 매도
+        sold_quantity, profit_amount = check_and_sell_profitable_positions(ticker, demo_mode)
+        if sold_quantity > 0:
+            log_and_update('수익실현', f'{sold_quantity:.6f}개 매도완료, 수익: {profit_amount:,.0f}원')
+        
+        # 2단계: 수익금을 포함하여 투자금 재계산
+        updated_investment, total_profit = update_investment_with_profits(total_investment)
+        if total_profit > 0:
+            total_investment = updated_investment  # 투자금에 수익 반영
+            
+            # 자동모드인 경우 모든 설정을 재조정
+            if config.get('auto_trading_mode', False):
+                # 그리드 개수 재계산
+                if config.get('auto_grid_count', True):
+                    grid_count = calculate_auto_grid_count_enhanced(
+                        high_price, low_price, 
+                        config.get('fee_rate', 0.0005), 
+                        total_investment
+                    )
+                    log_and_update('자동재계산', f"수익 반영 후 최적 그리드: {grid_count}개")
+                
+                # 리스크 설정 재적용
+                risk_settings = auto_trading_system.get_risk_settings(config.get('risk_mode', '안정적'))
+                max_investment_ratio = risk_settings['max_investment_ratio']
+                adjusted_investment = total_investment * max_investment_ratio
+                
+                # 그리드 개수 제한 재적용
+                max_grids = risk_settings['max_grid_count']
+                if grid_count > max_grids:
+                    grid_count = max_grids
+                    log_and_update('리스크재조정', f"그리드 개수 제한: {max_grids}개")
+        
+        # 3단계: 남은 포지션 로드
+        demo_positions = load_trading_state(ticker, demo_mode)
         current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
         invested_in_held_positions = sum(pos['quantity'] * pos['buy_price'] for pos in demo_positions)
         
-        # Ensure total_investment is treated as the initial capital
-        initial_capital = float(total_investment) 
+        # 업데이트된 투자금 기준으로 자산 계산
+        initial_capital = float(total_investment)
         current_cash_balance = initial_capital - invested_in_held_positions
         current_total_assets = current_cash_balance + current_held_assets_value
+        
+        # 그리드 계산 재수행 (수익 반영된 투자금 기준)
+        price_gap = (high_price - low_price) / grid_count
+        amount_per_grid = total_investment / grid_count
+        
+        # 그리드 가격 레벨 재생성
+        grid_levels = []
+        for i in range(grid_count + 1):
+            price_level = low_price + (price_gap * i)
+            grid_levels.append(price_level)
+        
+        log_and_update('설정재조정', f"그리드 간격: {price_gap:,.0f}원, 격당투자: {amount_per_grid:,.0f}원")
         
         if demo_mode:
             start_balance = current_total_assets
             demo_balance = current_total_assets
             if demo_positions:
-                log_and_update('정보', f'이어서 거래: {len(demo_positions)}개의 포지션을 복원했습니다.')
-                update_gui('action_status', 'waiting')
+                log_and_update('정보', f'거래 재개: {len(demo_positions)}개의 포지션 유지')
+            else:
+                log_and_update('정보', '거래 재개: 모든 포지션 정리 완료')
+            update_gui('action_status', 'waiting')
             total_invested = 0
     else:
         # 새로운 거래 시작 - 기존 상태 초기화
@@ -1211,6 +1374,18 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         initial_capital = float(total_investment)
         current_cash_balance = initial_capital
         current_total_assets = initial_capital
+        
+        # 그리드 간격 계산
+        price_gap = (high_price - low_price) / grid_count
+        amount_per_grid = total_investment / grid_count
+        
+        # 그리드 가격 레벨 생성
+        grid_levels = []
+        for i in range(grid_count + 1):
+            price_level = low_price + (price_gap * i)
+            grid_levels.append(price_level)
+        
+        log_and_update('설정', f"그리드 간격: {price_gap:,.0f}원, 격당투자: {amount_per_grid:,.0f}원")
         
         if demo_mode:
             start_balance = current_total_assets
@@ -2339,22 +2514,52 @@ def start_dashboard():
     def load_previous_trading_state():
         """이전 거래 상태를 로드하여 이어서 거래할 수 있도록 함"""
         try:
-            # 거래 상태 파일들이 존재하는지 확인
-            state_files_exist = False
-            for ticker in ["KRW-BTC", "KRW-ETH", "KRW-XRP"]:
-                state_file_path = f"trading_state_{ticker.replace('-', '_')}.json"
-                if os.path.exists(state_file_path):
-                    with open(state_file_path, 'r', encoding='utf-8') as f:
-                        state_data = json.load(f)
-                        if state_data.get('positions') or state_data.get('balance'):
-                            state_files_exist = True
+            # 거래 상태 파일과 수익 데이터 확인
+            has_trading_state = False
+            has_profits = False
+            
+            # trading_state.json 확인
+            if os.path.exists(state_file):
+                with open(state_file, 'r', encoding='utf-8') as f:
+                    state_data = json.load(f)
+                    for key, positions in state_data.items():
+                        if positions:  # 빈 리스트가 아닌 경우
+                            has_trading_state = True
                             break
             
-            if state_files_exist:
-                response = messagebox.askyesno(
-                    "거래 상태 복구", 
-                    "이전 거래 데이터가 발견되었습니다.\n이어서 거래하시겠습니까?\n\n'예'를 선택하면 기존 포지션과 잔고를 유지합니다.\n'아니오'를 선택하면 새로운 거래를 시작합니다."
-                )
+            # profits.json 확인
+            if os.path.exists(profit_file):
+                with open(profit_file, 'r', encoding='utf-8') as f:
+                    profit_data = json.load(f)
+                    if profit_data:  # 빈 딕셔너리가 아닌 경우
+                        has_profits = True
+            
+            # trade_logs.json 확인
+            has_trade_logs = False
+            if os.path.exists(log_file):
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    log_data = json.load(f)
+                    for ticker_logs in log_data.values():
+                        if ticker_logs:  # 빈 리스트가 아닌 경우
+                            has_trade_logs = True
+                            break
+            
+            if has_trading_state or has_profits or has_trade_logs:
+                message = "이전 거래 데이터가 발견되었습니다.\n\n"
+                if has_trading_state:
+                    message += "• 보유 포지션 데이터 존재\n"
+                if has_profits:
+                    message += "• 수익 데이터 존재\n"
+                if has_trade_logs:
+                    message += "• 거래 로그 데이터 존재\n"
+                    
+                message += "\n이어서 거래하시겠습니까?\n\n"
+                message += "'예': 기존 데이터를 바탕으로 거래 재개\n"
+                message += "      - 수익권 포지션은 자동 매도 후 투자금에 반영\n"
+                message += "      - 손실권 포지션은 유지하여 회복 대기\n"
+                message += "'아니오': 모든 데이터 초기화 후 새로 시작"
+                
+                response = messagebox.askyesno("거래 상태 복구", message)
                 return response
             return False
         except Exception as e:
@@ -2411,9 +2616,35 @@ def start_dashboard():
             period = period_combo.get()
             demo_mode = demo_var.get()
             target_profit_percent_str = target_entry.get()
+            
+            # 거래 재개 시 수익 재투자 처리
+            if should_resume:
+                # 수익금을 포함한 업데이트된 투자금 계산
+                updated_investment, total_profit = update_investment_with_profits(total_investment)
+                if total_profit > 0:
+                    # UI에 업데이트된 투자금 반영
+                    amount_entry.delete(0, tk.END)
+                    amount_entry.insert(0, str(int(updated_investment)))
+                    total_investment = updated_investment
+                    
+                    # 자동모드인 경우 그리드 개수도 재계산
+                    if auto_grid_var.get() and config.get('auto_trading_mode', False):
+                        representative_ticker = selected_tickers[0] if selected_tickers else "KRW-BTC"
+                        high_price, low_price = calculate_price_range(representative_ticker, period)
+                        if high_price and low_price:
+                            target_profit = 10.0
+                            if target_profit_percent_str and target_profit_percent_str.strip():
+                                try:
+                                    target_profit = float(target_profit_percent_str)
+                                except (ValueError, TypeError):
+                                    pass
+                            new_grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit, 0.0005)
+                            grid_entry.delete(0, tk.END)
+                            grid_entry.insert(0, str(new_grid_count))
+                            grid_count = new_grid_count
 
-            # 자동 그리드 개수 계산
-            if auto_grid_var.get():
+            # 자동 그리드 개수 계산 (재개가 아닌 경우만)
+            if auto_grid_var.get() and not should_resume:
                 representative_ticker = selected_tickers[0]
                 high_price, low_price = calculate_price_range(representative_ticker, period)
                 if high_price and low_price:
