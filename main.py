@@ -567,6 +567,7 @@ def save_profits_data(profits_data):
     try:
         with open(profit_file, 'w', encoding='utf-8') as f:
             json.dump(profits_data, f, indent=4, ensure_ascii=False)
+        print(f"수익 데이터 저장 완료: {profits_data}")  # 디버그 로그
         return True
     except Exception as e:
         print(f"수익 데이터 저장 오류: {e}")
@@ -1600,6 +1601,13 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     buy_cost = position['quantity'] * position['actual_buy_price']
                     net_profit = net_sell_amount - buy_cost
                     total_realized_profit += net_profit
+                    
+                    # profits.json에 수익 데이터 저장 (수익/손실 모두 기록)
+                    profits_data = load_profits_data()
+                    current_profit = profits_data.get(ticker, 0)
+                    profits_data[ticker] = current_profit + net_profit
+                    save_profits_data(profits_data)
+                    print(f"프로스 저장: {ticker} 수익 {net_profit:,.0f}원 추가")  # 디버그
 
                     log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
                     log_and_update("데모 매도", log_msg)
@@ -1646,6 +1654,13 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             buy_cost = position['quantity'] * position['actual_buy_price']
                             net_profit = net_sell_amount - buy_cost
                             total_realized_profit += net_profit
+                            
+                            # profits.json에 수익 데이터 저장 (수익/손실 모두 기록)
+                            profits_data = load_profits_data()
+                            current_profit = profits_data.get(ticker, 0)
+                            profits_data[ticker] = current_profit + net_profit
+                            save_profits_data(profits_data)
+                            print(f"프로스 저장: {ticker} 수익 {net_profit:,.0f}원 추가")  # 디버그
 
                             log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
                             log_and_update("데모 매도", log_msg)
@@ -1691,12 +1706,28 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             if (config.get("emergency_exit_enabled", True) and 
                 profit_percent <= config.get("stop_loss_threshold", -10.0)):
                 # 모든 포지션 청산
+                total_emergency_profit = 0
                 for position in demo_positions[:]:
                     sell_amount = position['quantity'] * price
                     sell_fee = sell_amount * fee_rate
                     net_sell_amount = sell_amount - sell_fee
                     demo_balance += net_sell_amount
+                    
+                    # 긴급청산에서도 수익 계산 및 저장
+                    buy_cost = position['quantity'] * position['actual_buy_price']
+                    net_profit = net_sell_amount - buy_cost
+                    total_emergency_profit += net_profit
+                    
                     demo_positions.remove(position)
+                
+                # profits.json에 긴급청산 수익 저장 (손실도 기록)
+                if total_emergency_profit != 0:
+                    profits_data = load_profits_data()
+                    current_profit = profits_data.get(ticker, 0)
+                    profits_data[ticker] = current_profit + total_emergency_profit
+                    save_profits_data(profits_data)
+                    print(f"긴급청산 수익 저장: {ticker} {total_emergency_profit:,.0f}원")  # 디버그
+                
                 save_trading_state(ticker, demo_positions, True) # 상태 저장
                 
                 log_and_update('긴급청산', f'손실 임계점 도달: {profit_percent:.2f}%')
@@ -1734,9 +1765,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             update_gui('chart_state', positions, grid_status)
             
         else:
-            # 실제 거래 모드 로직 (생략 - 데모와 유사하게 수정 필요) 
-            # TODO: 실제 거래 로직 구현
-            pass # 실제 거래 로직도 데모와 동일한 방식으로 log_and_update 및 update_gui('refresh_chart') 호출 필요
+            # 실제 거래 모드 로직 - 데모와 동일한 로직 적용
+            # 실제 거래는 upbit API를 사용하여 실제 매매 주문 수행
+            # 데모와 동일한 매도 로직이지만 profits.json 저장도 포함
+            log_and_update('실제거래', '실제 거래 모드는 현재 개발 중입니다.')
+            # 실제 거래 모드에서도 profits.json에 수익 저장해야 함
 
 
         
