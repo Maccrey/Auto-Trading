@@ -113,8 +113,177 @@ default_config = {
     "risk_mode": "보수적",  # 리스크 모드 (보수적, 안정적, 공격적, 극공격적)
     "auto_update_interval": 60,  # 자동 업데이트 간격 (분)
     "performance_tracking": True,  # 실적 추적 활성화
-    "auto_optimization": True  # 자동 최적화 활성화
+    "auto_optimization": True,  # 자동 최적화 활성화
+    # 코인별 그리드 설정
+    "coin_specific_grids": {
+        "KRW-BTC": {
+            "enabled": True,
+            "grid_count": 20,
+            "price_range_days": 7,
+            "volatility_multiplier": 1.0,
+            "min_grid_count": 10,
+            "max_grid_count": 50
+        },
+        "KRW-ETH": {
+            "enabled": True,
+            "grid_count": 25,
+            "price_range_days": 5,
+            "volatility_multiplier": 1.2,
+            "min_grid_count": 15,
+            "max_grid_count": 60
+        },
+        "KRW-XRP": {
+            "enabled": True,
+            "grid_count": 30,
+            "price_range_days": 3,
+            "volatility_multiplier": 1.5,
+            "min_grid_count": 20,
+            "max_grid_count": 80
+        }
+    }
 }
+
+class CoinSpecificGridManager:
+    """코인별 그리드 설정 및 최적화 관리자"""
+    
+    def __init__(self):
+        self.coin_profiles = {
+            "KRW-BTC": {
+                "volatility_factor": 1.0,  # 기준 변동성
+                "liquidity_factor": 1.0,   # 기준 유동성
+                "trend_sensitivity": 0.8,  # 트렌드 민감도 (낮음)
+                "optimal_grid_base": 20,   # 기본 그리드 수
+                "price_tier_multiplier": 1.0  # 가격대 별 변경 비율
+            },
+            "KRW-ETH": {
+                "volatility_factor": 1.2,
+                "liquidity_factor": 1.1,
+                "trend_sensitivity": 1.0,
+                "optimal_grid_base": 25,
+                "price_tier_multiplier": 1.1
+            },
+            "KRW-XRP": {
+                "volatility_factor": 1.8,
+                "liquidity_factor": 0.9,
+                "trend_sensitivity": 1.3,
+                "optimal_grid_base": 30,
+                "price_tier_multiplier": 1.3
+            }
+        }
+    
+    def get_coin_profile(self, ticker):
+        """코인별 프로필 반환"""
+        return self.coin_profiles.get(ticker, self.coin_profiles["KRW-BTC"])
+    
+    def calculate_optimal_grid_count(self, ticker, price_range, total_investment, current_price=None):
+        """코인별 최적 그리드 수 계산"""
+        try:
+            profile = self.get_coin_profile(ticker)
+            coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
+            
+            # 기본 그리드 수
+            base_grids = coin_config.get('grid_count', profile['optimal_grid_base'])
+            
+            # 가격 범위에 따른 조정
+            if price_range and len(price_range) >= 2:
+                high_price, low_price = price_range[0], price_range[1]
+                price_volatility = (high_price - low_price) / low_price
+                
+                # 변동성에 따른 그리드 수 조정
+                volatility_adjustment = price_volatility * profile['volatility_factor']
+                
+                # 최종 그리드 수 계산
+                optimal_grids = int(base_grids * (1 + volatility_adjustment))
+                
+                # 범위 제한
+                min_grids = coin_config.get('min_grid_count', 5)
+                max_grids = coin_config.get('max_grid_count', 100)
+                
+                optimal_grids = max(min_grids, min(max_grids, optimal_grids))
+                
+                return optimal_grids
+            
+            return base_grids
+            
+        except Exception as e:
+            print(f"코인별 그리드 계산 오류 ({ticker}): {e}")
+            return 20  # 기본값
+    
+    def get_price_range_days(self, ticker):
+        """코인별 가격 범위 계산 기간 반환"""
+        coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
+        return coin_config.get('price_range_days', 7)
+    
+    def adjust_grid_for_market_condition(self, ticker, base_grid_count, market_data):
+        """시장 상황에 따른 그리드 수 동적 조정"""
+        try:
+            profile = self.get_coin_profile(ticker)
+            
+            # 시장 데이터에서 지표 추출
+            volatility = market_data.get('volatility', 0)
+            trend_strength = market_data.get('trend_strength', 0)
+            volume_ratio = market_data.get('volume_ratio', 1.0)
+            
+            adjustment_factor = 1.0
+            
+            # 1. 변동성 반영
+            if volatility > 0.05:  # 5% 이상 변동성
+                adjustment_factor *= (1 + volatility * profile['volatility_factor'])
+            
+            # 2. 트렌드 강도 반영
+            if trend_strength > 0.03:  # 강한 트렌드
+                adjustment_factor *= (1 + trend_strength * profile['trend_sensitivity'])
+            
+            # 3. 거래량 반영
+            if volume_ratio > 1.5:  # 평소보다 1.5배 이상
+                adjustment_factor *= 1.1
+            elif volume_ratio < 0.7:  # 평소보다 30% 이하
+                adjustment_factor *= 0.9
+            
+            adjusted_grids = int(base_grid_count * adjustment_factor)
+            
+            # 범위 제한
+            coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
+            min_grids = coin_config.get('min_grid_count', 5)
+            max_grids = coin_config.get('max_grid_count', 100)
+            
+            return max(min_grids, min(max_grids, adjusted_grids))
+            
+        except Exception as e:
+            print(f"시장 조건 그리드 조정 오류 ({ticker}): {e}")
+            return base_grid_count
+    
+    def get_real_time_market_data(self, ticker):
+        """실시간 시장 데이터 수집 및 분석"""
+        try:
+            # 1시간 봉 데이터 24개 가져오기
+            df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+            if df is None or len(df) < 10:
+                return {'volatility': 0, 'trend_strength': 0, 'volume_ratio': 1.0}
+            
+            # 변동성 계산 (24시간 기준)
+            price_changes = df['close'].pct_change().abs()
+            volatility = price_changes.std()
+            
+            # 트렌드 강도 계산 (최근 12시간 vs 이전 12시간)
+            recent_avg = df['close'][-12:].mean()
+            prev_avg = df['close'][-24:-12].mean()
+            trend_strength = abs((recent_avg - prev_avg) / prev_avg)
+            
+            # 거래량 비율 (최근 6시간 vs 평균)
+            recent_volume = df['volume'][-6:].mean()
+            avg_volume = df['volume'].mean()
+            volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1.0
+            
+            return {
+                'volatility': volatility,
+                'trend_strength': trend_strength,
+                'volume_ratio': volume_ratio
+            }
+            
+        except Exception as e:
+            print(f"실시간 시장 데이터 수집 오류 ({ticker}): {e}")
+            return {'volatility': 0, 'trend_strength': 0, 'volume_ratio': 1.0}
 
 # 완전 자동 거래 시스템
 class AutoTradingSystem:
@@ -389,12 +558,38 @@ class AutoTradingSystem:
         elif win_rate < 0.3:  # 매우 낮은 승률
             optimized_config["grid_confirmation_buffer"] *= 1.8  # 버퍼 강한 증가
         
-        # 동적 그리드 수 조정 (시장 상황에 따라)
+        # 코인별 동적 그리드 수 조정 (시장 상황에 따라)
         trend_strength = performance_analysis.get("trend_strength", 0)
-        if trend_strength > 0.05:  # 강한 트렌드
-            optimized_config["max_grid_count"] = int(risk_settings["max_grid_count"] * 1.2)  # 그리드 수 증가
-        elif trend_strength < 0.01:  # 약한 트렌드
-            optimized_config["max_grid_count"] = int(risk_settings["max_grid_count"] * 0.8)  # 그리드 수 감소
+        
+        # 각 코인별로 다른 그리드 수 적용
+        coin_grids = {}
+        for ticker in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']:
+            coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
+            base_grids = coin_config.get('grid_count', 20)
+            
+            # 시장 상황 반영
+            market_data = {
+                'volatility': volatility,
+                'trend_strength': trend_strength,
+                'volume_ratio': 1.0  # 기본값
+            }
+            
+            adjusted_grids = coin_grid_manager.adjust_grid_for_market_condition(ticker, base_grids, market_data)
+            coin_grids[ticker] = adjusted_grids
+            
+            # 코인별 설정 업데이트
+            if ticker not in optimized_config.get('coin_specific_grids', {}):
+                if 'coin_specific_grids' not in optimized_config:
+                    optimized_config['coin_specific_grids'] = {}
+                optimized_config['coin_specific_grids'][ticker] = coin_config.copy()
+            
+            optimized_config['coin_specific_grids'][ticker]['grid_count'] = adjusted_grids
+        
+        # 전체 최대 그리드 수도 업데이트 (최대값 사용)
+        max_coin_grids = max(coin_grids.values()) if coin_grids else risk_settings["max_grid_count"]
+        optimized_config["max_grid_count"] = max_coin_grids
+        
+        print(f"코인별 그리드 수 업데이트: BTC={coin_grids.get('KRW-BTC', 20)}, ETH={coin_grids.get('KRW-ETH', 25)}, XRP={coin_grids.get('KRW-XRP', 30)}")
         
         optimized_config["last_optimization"] = datetime.now().isoformat()
         # 동적 그리드 수 조정 로직 추가
@@ -403,51 +598,56 @@ class AutoTradingSystem:
         return optimized_config
     
     def dynamic_grid_adjustment(self, config, performance_analysis):
-        """시장 상황에 따른 동적 그리드 수 조정"""
+        """코인별 동적 그리드 수 조정"""
         try:
             volatility = performance_analysis.get('volatility_score', 0)
             trend_strength = performance_analysis.get('trend_strength', 0)
             win_rate = performance_analysis.get('win_rate', 0)
             
-            # 기본 그리드 수 가져오기
-            base_grid_count = config.get('max_grid_count', 20)
+            # 코인별 그리드 수 동적 조정
+            coin_grids_updated = {}
             
-            # 조정 계수 계산
-            adjustment_factor = 1.0
+            for ticker in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']:
+                coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
+                base_grid_count = coin_config.get('grid_count', 20)
+                
+                # 시장 데이터 준비
+                market_data = {
+                    'volatility': volatility,
+                    'trend_strength': trend_strength,
+                    'volume_ratio': 1.0,
+                    'win_rate': win_rate
+                }
+                
+                # 코인별 조정
+                adjusted_grids = coin_grid_manager.adjust_grid_for_market_condition(ticker, base_grid_count, market_data)
+                coin_grids_updated[ticker] = adjusted_grids
+                
+                # 설정 업데이트
+                if 'coin_specific_grids' not in config:
+                    config['coin_specific_grids'] = {}
+                if ticker not in config['coin_specific_grids']:
+                    config['coin_specific_grids'][ticker] = coin_config.copy()
+                
+                config['coin_specific_grids'][ticker]['grid_count'] = adjusted_grids
+                
+                if adjusted_grids != base_grid_count:
+                    korean_name = get_korean_coin_name(ticker)
+                    print(f"{korean_name} 그리드 수 동적 조정: {base_grid_count} → {adjusted_grids}")
             
-            # 1. 변동성에 따른 조정
-            if volatility > 3.0:  # 고변동성 - 그리드 수 증가
-                adjustment_factor *= 1.3
-            elif volatility < 1.0:  # 저변동성 - 그리드 수 감소
-                adjustment_factor *= 0.7
-            
-            # 2. 트렌드 강도에 따른 조정
-            if trend_strength > 0.05:  # 강한 트렌드 - 그리드 수 증가
-                adjustment_factor *= 1.2
-            elif trend_strength < 0.01:  # 약한 트렌드 - 그리드 수 감소
-                adjustment_factor *= 0.8
-            
-            # 3. 승률에 따른 조정
-            if win_rate > 0.7:  # 높은 승률 - 더 적극적
-                adjustment_factor *= 1.1
-            elif win_rate < 0.4:  # 낮은 승률 - 더 보수적
-                adjustment_factor *= 0.9
-            
-            # 최종 그리드 수 계산 (최소 5, 최대 50)
-            new_grid_count = max(5, min(50, int(base_grid_count * adjustment_factor)))
-            
-            if new_grid_count != base_grid_count:
-                config['max_grid_count'] = new_grid_count
-                print(f"동적 그리드 수 조정: {base_grid_count} → {new_grid_count} (변동성: {volatility:.1f}, 트렌드: {trend_strength:.3f}, 승률: {win_rate:.1%})")
+            # 전체 최대 그리드 수 업데이트
+            max_grids = max(coin_grids_updated.values()) if coin_grids_updated else config.get('max_grid_count', 20)
+            config['max_grid_count'] = max_grids
             
             return config
             
         except Exception as e:
-            print(f"동적 그리드 조정 오류: {e}")
+            print(f"코인별 동적 그리드 조정 오류: {e}")
             return config
 
-# 글로벌 자동 거래 시스템 인스턴스
+# 글로벌 시스템 인스턴스
 auto_trading_system = AutoTradingSystem()
+coin_grid_manager = CoinSpecificGridManager()
 
 # 자동 최적화 스케줄러
 class AutoOptimizationScheduler:
@@ -978,6 +1178,13 @@ def detect_panic_selling(current_price, previous_prices, threshold_percent=-5.0)
 
 # 향상된 가격 범위 계산 함수
 def calculate_enhanced_price_range(ticker, period, use_custom_range=False, custom_high=None, custom_low=None):
+    """코인별 최적화된 가격 범위 계산"""
+    # 코인별 설정 기간 사용
+    if config.get('auto_trading_mode', False):
+        coin_period = coin_grid_manager.get_price_range_days(ticker)
+        if coin_period != period:
+            period = coin_period
+            print(f"{get_korean_coin_name(ticker)} 코인별 가격범위 기간: {period}일")
     """향상된 가격 범위 계산 (사용자 지정 범위 및 자동 그리드 개수 고려)"""
     if use_custom_range and custom_high and custom_low:
         try:
@@ -1115,7 +1322,13 @@ def calculate_price_range(ticker, period):
         print(f"가격 범위 계산 오류: {e}")
         return None, None
 
-def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, investment_amount=1000000):
+def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, investment_amount=1000000, ticker=None):
+    """코인별 최적화된 그리드 수 계산"""
+    # 코인별 최적화 사용
+    if ticker and config.get('auto_trading_mode', False):
+        optimal_grids = coin_grid_manager.calculate_optimal_grid_count(ticker, [high_price, low_price], investment_amount)
+        print(f"{get_korean_coin_name(ticker)} 코인별 최적 그리드: {optimal_grids}개")
+        return optimal_grids
     """
     가격 범위와 거래 수수료를 고려하여 최적의 그리드 개수를 자동 계산
     """
@@ -1141,7 +1354,11 @@ def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, i
     
     return optimal_grids
 
-def calculate_optimal_grid_count(high_price, low_price, target_profit_percent=None, fee_rate=0.0005):
+def calculate_optimal_grid_count(high_price, low_price, target_profit_percent=None, fee_rate=0.0005, ticker=None):
+    """코인별 최적 그리드 수 계산 (호환성 유지)"""
+    # 코인별 최적화 사용
+    if ticker and config.get('auto_trading_mode', False):
+        return coin_grid_manager.calculate_optimal_grid_count(ticker, [high_price, low_price], 0)
     """
     기존 호환성을 위한 래퍼 함수
     """
@@ -1500,7 +1717,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         grid_count = calculate_auto_grid_count_enhanced(
             high_price, low_price, 
             config.get('fee_rate', 0.0005), 
-            total_investment
+            total_investment,
+            ticker  # 코인별 최적화를 위해 ticker 전달
         )
         log_and_update('자동계산', f"최적 그리드 개수: {grid_count}개")
 
@@ -1539,7 +1757,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     grid_count = calculate_auto_grid_count_enhanced(
                         high_price, low_price, 
                         config.get('fee_rate', 0.0005), 
-                        total_investment
+                        total_investment,
+                        ticker  # 코인별 최적화를 위해 ticker 전달
                     )
                     log_and_update('자동재계산', f"수익 반영 후 최적 그리드: {grid_count}개")
                 
@@ -1651,7 +1870,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             new_high, new_low = calculate_price_range(ticker, period)
             if new_high and new_low:
                 high_price, low_price = new_high, new_low
-                grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit_percent, fee_rate)
+                grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit_percent, fee_rate, ticker)
                 price_gap = (high_price - low_price) / grid_count
                 grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
                 
@@ -2221,6 +2440,83 @@ def open_settings_window(parent, current_config, update_callback, grid_recalc_ca
 
     kakao_enabled_var = tk.BooleanVar(value=current_config.get('kakao_enabled', True))
     ttk.Checkbutton(notification_frame, text="카카오톡 알림 사용", variable=kakao_enabled_var).grid(row=1, column=0, sticky='w', padx=5)
+    
+    # 7. 코인별 그리드 설정 탭
+    coin_frame = ttk.Frame(notebook)
+    notebook.add(coin_frame, text='코인별 설정')
+    
+    # 상단 안내 메시지
+    info_label = ttk.Label(coin_frame, text="ℹ️ 코인별로 다른 그리드 수와 가격범위 기간을 설정할 수 있습니다.", foreground="blue")
+    info_label.grid(row=0, column=0, columnspan=4, sticky='w', padx=5, pady=(5, 10))
+    
+    # 코인별 설정 변수들
+    coin_vars = {}
+    
+    # 헤더
+    ttk.Label(coin_frame, text="코인", font=('Helvetica', 9, 'bold')).grid(row=1, column=0, padx=5, pady=2)
+    ttk.Label(coin_frame, text="그리드 수", font=('Helvetica', 9, 'bold')).grid(row=1, column=1, padx=5, pady=2)
+    ttk.Label(coin_frame, text="가격범위 기간(일)", font=('Helvetica', 9, 'bold')).grid(row=1, column=2, padx=5, pady=2)
+    ttk.Label(coin_frame, text="변동성 배수", font=('Helvetica', 9, 'bold')).grid(row=1, column=3, padx=5, pady=2)
+    
+    # 코인별 설정 입력 필드
+    coins = [
+        ('KRW-BTC', '비트코인'),
+        ('KRW-ETH', '이더리움'),
+        ('KRW-XRP', '리플')
+    ]
+    
+    for i, (ticker, name) in enumerate(coins, start=2):
+        coin_config = current_config.get('coin_specific_grids', {}).get(ticker, {})
+        
+        # 코인 이름
+        ttk.Label(coin_frame, text=name).grid(row=i, column=0, sticky='w', padx=5, pady=2)
+        
+        # 그리드 수
+        grid_var = tk.StringVar(value=str(coin_config.get('grid_count', 20)))
+        grid_entry = ttk.Entry(coin_frame, textvariable=grid_var, width=10)
+        grid_entry.grid(row=i, column=1, padx=5, pady=2)
+        
+        # 가격범위 기간
+        days_var = tk.StringVar(value=str(coin_config.get('price_range_days', 7)))
+        days_entry = ttk.Entry(coin_frame, textvariable=days_var, width=10)
+        days_entry.grid(row=i, column=2, padx=5, pady=2)
+        
+        # 변동성 배수
+        vol_var = tk.StringVar(value=str(coin_config.get('volatility_multiplier', 1.0)))
+        vol_entry = ttk.Entry(coin_frame, textvariable=vol_var, width=10)
+        vol_entry.grid(row=i, column=3, padx=5, pady=2)
+        
+        coin_vars[ticker] = {
+            'grid_count': grid_var,
+            'price_range_days': days_var,
+            'volatility_multiplier': vol_var
+        }
+    
+    # 리셋 버튼
+    def reset_coin_defaults():
+        default_values = {
+            'KRW-BTC': {'grid_count': 20, 'price_range_days': 7, 'volatility_multiplier': 1.0},
+            'KRW-ETH': {'grid_count': 25, 'price_range_days': 5, 'volatility_multiplier': 1.2},
+            'KRW-XRP': {'grid_count': 30, 'price_range_days': 3, 'volatility_multiplier': 1.5}
+        }
+        
+        for ticker, values in default_values.items():
+            if ticker in coin_vars:
+                coin_vars[ticker]['grid_count'].set(str(values['grid_count']))
+                coin_vars[ticker]['price_range_days'].set(str(values['price_range_days']))
+                coin_vars[ticker]['volatility_multiplier'].set(str(values['volatility_multiplier']))
+    
+    reset_btn = ttk.Button(coin_frame, text="기본값 복원", command=reset_coin_defaults)
+    reset_btn.grid(row=len(coins)+2, column=0, columnspan=2, pady=10, sticky='w', padx=5)
+    
+    # 도움말 메시지
+    help_text = """ℹ️ 도움말:
+• 그리드 수: 해당 코인의 기본 그리드 개수 (자동모드에서 시장상황에 따라 동적 조정됨)
+• 가격범위 기간: 그리드 범위 계산에 사용할 과거 데이터 기간
+• 변동성 배수: 변동성에 따른 그리드 수 조정 강도 (높을수록 더 많이 조정)"""
+    
+    help_label = ttk.Label(coin_frame, text=help_text, foreground="gray", font=('Helvetica', 8))
+    help_label.grid(row=len(coins)+3, column=0, columnspan=4, sticky='w', padx=5, pady=5)
 
     def save_and_close():
         try:
@@ -2251,6 +2547,29 @@ def open_settings_window(parent, current_config, update_callback, grid_recalc_ca
             # Notification
             current_config['tts_enabled'] = tts_enabled_var.get()
             current_config['kakao_enabled'] = kakao_enabled_var.get()
+            
+            # 코인별 설정 저장
+            if 'coin_specific_grids' not in current_config:
+                current_config['coin_specific_grids'] = {}
+            
+            for ticker in coin_vars:
+                try:
+                    grid_count = int(coin_vars[ticker]['grid_count'].get())
+                    price_range_days = int(coin_vars[ticker]['price_range_days'].get())
+                    volatility_multiplier = float(coin_vars[ticker]['volatility_multiplier'].get())
+                    
+                    current_config['coin_specific_grids'][ticker] = {
+                        'enabled': True,
+                        'grid_count': max(5, min(100, grid_count)),  # 5-100 범위 제한
+                        'price_range_days': max(1, min(30, price_range_days)),  # 1-30일 범위
+                        'volatility_multiplier': max(0.1, min(3.0, volatility_multiplier)),  # 0.1-3.0 범위
+                        'min_grid_count': 5,
+                        'max_grid_count': 100
+                    }
+                except ValueError:
+                    # 잘못된 입력이 있으면 기본값 사용
+                    messagebox.showwarning("입력 오류", f"{get_korean_coin_name(ticker)} 설정에 잘못된 값이 있어 기본값을 사용합니다.")
+                    continue
 
             if save_config(current_config):
                 messagebox.showinfo("성공", "설정이 저장되었습니다.", parent=win)
