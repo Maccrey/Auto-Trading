@@ -2210,6 +2210,41 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     grid_count = max_grids
                     log_and_update('리스크재조정', f"그리드 개수 제한: {max_grids}개")
         
+        # 2.5단계: 거래 재개 시에도 투자금 분배 재계산
+        active_coins = [coin for coin in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'] 
+                       if config.get(f'trade_{coin.split("-")[1].lower()}', False)]
+        
+        if len(active_coins) > 1:  # 다중 코인 거래인 경우만 재분배
+            # 그리드 설정 정보 수집 (재개 시)
+            grid_configs = {}
+            for coin in active_coins:
+                try:
+                    coin_high, coin_low = calculate_price_range(coin, period)
+                    if coin_high and coin_low:
+                        coin_grid_count = calculate_optimal_grid_count(coin_high, coin_low, target_profit_percent, fee_rate, coin)
+                        grid_configs[coin] = {
+                            'count': coin_grid_count,
+                            'range': coin_high - coin_low,
+                            'high': coin_high,
+                            'low': coin_low
+                        }
+                except Exception as e:
+                    print(f"그리드 설정 수집 오류 ({coin}): {e}")
+            
+            # 투자금 재분배 계산
+            allocations = coin_allocation_system.calculate_optimal_allocation(
+                total_investment, active_coins, grid_configs
+            )
+            
+            # 현재 코인의 분배된 투자금 사용
+            allocated_investment = allocations.get(ticker, total_investment / len(active_coins))
+            total_investment = allocated_investment  # 분배된 투자금으로 업데이트
+            
+            log_and_update('재분배완료', f"거래재개 시 분배금: {allocated_investment:,.0f}원 ({allocated_investment/sum(allocations.values())*100:.1f}%)")
+            
+            # GUI에 분배 정보 업데이트
+            update_gui('allocation_info')
+        
         # 3단계: 남은 포지션 로드
         demo_positions = load_trading_state(ticker, demo_mode)
         current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
@@ -2220,9 +2255,20 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         current_cash_balance = initial_capital - invested_in_held_positions
         current_total_assets = current_cash_balance + current_held_assets_value
         
-        # 그리드 계산 재수행 (수익 반영된 투자금 기준)
+        # 그리드 계산 재수행 (현재 보유 포지션 고려)
         price_gap = (high_price - low_price) / grid_count
-        amount_per_grid = total_investment / grid_count
+        
+        # 기존 포지션들이 차지한 그리드 슬롯 계산
+        occupied_grid_slots = len(demo_positions)
+        available_grid_slots = max(1, grid_count - occupied_grid_slots)  # 최소 1개 슬롯은 보장
+        
+        # 사용 가능한 현금으로 남은 그리드 슬롯에 투자
+        if current_cash_balance > 0 and available_grid_slots > 0:
+            amount_per_grid = current_cash_balance / available_grid_slots
+        else:
+            amount_per_grid = total_investment / grid_count  # 폴백: 기존 방식
+        
+        log_and_update('거래재개', f"보유포지션: {occupied_grid_slots}개, 사용가능현금: {current_cash_balance:,.0f}원, 남은슬롯: {available_grid_slots}개")
         
         # 그리드 가격 레벨 재생성
         grid_levels = []
