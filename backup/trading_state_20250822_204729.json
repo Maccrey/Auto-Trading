@@ -1,0 +1,79 @@
+{
+    "demo_KRW-XRP": [
+        {
+            "buy_price": 4004.4745454545455,
+            "quantity": 2.269052664269651,
+            "target_sell_price": 4011.6175757575757,
+            "actual_buy_price": 4004.4745454545455,
+            "highest_price": 4009.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        },
+        {
+            "buy_price": 3997.3315151515153,
+            "quantity": 2.2731073472196677,
+            "target_sell_price": 4004.4745454545455,
+            "actual_buy_price": 3997.3315151515153,
+            "highest_price": 4003.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        },
+        {
+            "buy_price": 3968.759393939394,
+            "quantity": 2.289472032554864,
+            "target_sell_price": 3975.9024242424243,
+            "actual_buy_price": 3968.759393939394,
+            "highest_price": 3974.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        },
+        {
+            "buy_price": 3954.4733333333334,
+            "quantity": 2.297743054624291,
+            "target_sell_price": 3961.6163636363635,
+            "actual_buy_price": 3954.4733333333334,
+            "highest_price": 3959.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        }
+    ],
+    "demo_KRW-ETH": [
+        {
+            "buy_price": 6082332.307692308,
+            "quantity": 0.001896097043745365,
+            "target_sell_price": 6095373.846153846,
+            "actual_buy_price": 6082332.307692308,
+            "highest_price": 6090000.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        },
+        {
+            "buy_price": 6043207.692307692,
+            "quantity": 0.0019083726548687213,
+            "target_sell_price": 6056249.230769231,
+            "actual_buy_price": 6043207.692307692,
+            "highest_price": 6055000.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        },
+        {
+            "buy_price": 6017124.615384615,
+            "quantity": 0.0019166450829696067,
+            "target_sell_price": 6030166.153846154,
+            "actual_buy_price": 6017124.615384615,
+            "highest_price": 6029000.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        },
+        {
+            "buy_price": 5991041.538461538,
+            "quantity": 0.0019249895420778258,
+            "target_sell_price": 6004083.076923077,
+            "actual_buy_price": 5991041.538461538,
+            "highest_price": 6003000.0,
+            "sell_held": false,
+            "highest_grid_reached": -1
+        }
+    ],
+    "demo_KRW-BTC": []
+}

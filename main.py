@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import xlsxwriter
 import pyttsx3
+import shutil
 
 # TTS 엔진 초기화
 try:
@@ -862,6 +863,224 @@ def save_config(config):
 # 전역 설정
 
 upbit = None
+config = {}
+stop_event = None
+
+# 코인별 투자금 분배 시스템
+class CoinAllocationSystem:
+    def __init__(self):
+        self.coin_profiles = {
+            "KRW-BTC": {
+                "volatility_weight": 0.6,    # 안정성 중심
+                "min_allocation": 0.20,       # 최소 20% 분배
+                "max_allocation": 0.50        # 최대 50% 분배
+            },
+            "KRW-ETH": {
+                "volatility_weight": 0.8,    # 중간 안정성
+                "min_allocation": 0.15,       # 최소 15% 분배
+                "max_allocation": 0.45        # 최대 45% 분배
+            },
+            "KRW-XRP": {
+                "volatility_weight": 1.0,    # 고수익 추구
+                "min_allocation": 0.10,       # 최소 10% 분배
+                "max_allocation": 0.40        # 최대 40% 분배
+            }
+        }
+        self.allocation_cache = {}
+        self.last_calculation_time = None
+    
+    def analyze_coin_performance(self, ticker, period='1h'):
+        """코인별 성과 분석"""
+        try:
+            # 가격 데이터 수집
+            df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)  # 최근 24시간
+            if df is None or df.empty:
+                return {'score': 0.5, 'volatility': 0.05, 'trend': 0}
+            
+            # 변동성 계산
+            volatility = (df['high'] - df['low']).mean() / df['close'].mean()
+            
+            # 트렌드 강도 계산
+            price_change = (df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0]
+            
+            # 거래량 분석
+            volume_ratio = df['volume'].iloc[-6:].mean() / df['volume'].mean()  # 최근 6시간 대비
+            
+            # 종합 점수 계산 (0.0 ~ 1.0)
+            trend_score = max(0, price_change + 0.5)  # 상승 트렌드에 가중치
+            volatility_score = min(1.0, volatility * 10)  # 적절한 변동성에 가중치
+            volume_score = min(1.0, volume_ratio)  # 거래량 증가에 가중치
+            
+            composite_score = (trend_score * 0.4 + volatility_score * 0.4 + volume_score * 0.2)
+            
+            return {
+                'score': composite_score,
+                'volatility': volatility,
+                'trend': price_change,
+                'volume_ratio': volume_ratio
+            }
+            
+        except Exception as e:
+            print(f"코인 성과 분석 오류 ({ticker}): {e}")
+            return {'score': 0.5, 'volatility': 0.05, 'trend': 0}
+    
+    def calculate_grid_efficiency(self, ticker, grid_count, price_range):
+        """그리드 효율성 계산"""
+        try:
+            profile = self.coin_profiles.get(ticker, {'volatility_weight': 0.7})
+            
+            # 가격 범위 대비 그리드 밀도
+            if price_range > 0:
+                grid_density = grid_count / price_range
+            else:
+                grid_density = 0.1
+            
+            # 최적 그리드 개수와의 차이 (적을수록 좋음)
+            optimal_grids = 20 + int(profile['volatility_weight'] * 15)  # 20-35개 사이
+            grid_deviation = abs(grid_count - optimal_grids) / optimal_grids
+            
+            # 효율성 점수 계산 (0.0 ~ 1.0)
+            efficiency_score = max(0.1, 1.0 - grid_deviation)
+            
+            return efficiency_score
+            
+        except Exception as e:
+            print(f"그리드 효율성 계산 오류 ({ticker}): {e}")
+            return 0.5
+    
+    def calculate_optimal_allocation(self, total_investment, active_coins, grid_configs):
+        """총 투자금을 코인별로 최적 분배"""
+        try:
+            current_time = datetime.now()
+            # 5분마다 재계산
+            if (self.last_calculation_time and 
+                (current_time - self.last_calculation_time).total_seconds() < 300):
+                return self.allocation_cache
+            
+            coin_scores = {}
+            total_score = 0
+            
+            # 각 코인별 점수 계산
+            for ticker in active_coins:
+                if ticker not in self.coin_profiles:
+                    continue
+                
+                # 성과 분석
+                performance = self.analyze_coin_performance(ticker)
+                
+                # 그리드 설정 효율성
+                grid_info = grid_configs.get(ticker, {})
+                grid_count = grid_info.get('count', 20)
+                price_range = grid_info.get('range', 100000)
+                grid_efficiency = self.calculate_grid_efficiency(ticker, grid_count, price_range)
+                
+                # 코인 프로필 가중치
+                profile = self.coin_profiles[ticker]
+                volatility_factor = profile['volatility_weight']
+                
+                # 종합 점수 계산
+                composite_score = (
+                    performance['score'] * 0.5 +       # 성과 50%
+                    grid_efficiency * 0.3 +            # 그리드 효율성 30%
+                    volatility_factor * 0.2             # 코인 특성 20%
+                )
+                
+                coin_scores[ticker] = composite_score
+                total_score += composite_score
+            
+            # 분배 비율 계산
+            allocations = {}
+            remaining_investment = total_investment
+            
+            for ticker in active_coins:
+                if ticker not in coin_scores:
+                    continue
+                
+                profile = self.coin_profiles[ticker]
+                
+                if total_score > 0:
+                    # 점수 기반 초기 분배
+                    score_ratio = coin_scores[ticker] / total_score
+                    initial_allocation = total_investment * score_ratio
+                else:
+                    # 동일 분배
+                    initial_allocation = total_investment / len(active_coins)
+                
+                # 최소/최대 한도 적용
+                min_amount = total_investment * profile['min_allocation']
+                max_amount = total_investment * profile['max_allocation']
+                
+                final_allocation = max(min_amount, min(max_amount, initial_allocation))
+                allocations[ticker] = final_allocation
+                remaining_investment -= final_allocation
+            
+            # 남은 투자금 재분배 (비례 분배)
+            if remaining_investment != 0 and allocations:
+                current_total = sum(allocations.values())
+                if current_total > 0:
+                    for ticker in allocations:
+                        ratio = allocations[ticker] / current_total
+                        allocations[ticker] += remaining_investment * ratio
+            
+            # 캐시 업데이트
+            self.allocation_cache = allocations
+            self.last_calculation_time = current_time
+            
+            return allocations
+            
+        except Exception as e:
+            print(f"투자금 분배 계산 오류: {e}")
+            # 오류 시 동일 분배
+            equal_allocation = total_investment / max(1, len(active_coins))
+            return {ticker: equal_allocation for ticker in active_coins}
+    
+    def get_allocation_info(self, ticker):
+        """특정 코인의 분배 정보 반환"""
+        return self.allocation_cache.get(ticker, 0)
+    
+    def get_total_allocated(self):
+        """총 분배된 금액 반환"""
+        return sum(self.allocation_cache.values())
+    
+    def rebalance_allocations(self, total_investment, active_coins, grid_configs):
+        """업데이트 간격마다 투자금 재분배"""
+        try:
+            # 새로운 분배 계산
+            new_allocations = self.calculate_optimal_allocation(total_investment, active_coins, grid_configs)
+            
+            # 분배 변화량 계산 및 로그
+            for ticker in active_coins:
+                old_allocation = self.allocation_cache.get(ticker, 0)
+                new_allocation = new_allocations.get(ticker, 0)
+                change = new_allocation - old_allocation
+                
+                if abs(change) > total_investment * 0.05:  # 5% 이상 변화시에만 로그
+                    change_percent = (change / total_investment) * 100
+                    log_trade(ticker, "투자금재분배", f"{old_allocation:,.0f}원 → {new_allocation:,.0f}원 ({change_percent:+.1f}%)")
+            
+            return new_allocations
+            
+        except Exception as e:
+            print(f"투자금 재분배 오류: {e}")
+            return self.allocation_cache
+
+def calculate_total_investment_with_profits():
+    """수익을 포함한 전체 투자금 계산"""
+    try:
+        # 기본 투자금
+        total_investment = float(config.get('total_investment', 1000000))
+        
+        # 실현된 수익 추가
+        total_realized_profit = calculate_total_realized_profit()
+        
+        return total_investment + total_realized_profit
+        
+    except Exception as e:
+        print(f"전체 투자금 계산 오류: {e}")
+        return float(config.get('total_investment', 1000000))
+
+# 전역 투자금 분배 시스템 인스턴스
+coin_allocation_system = CoinAllocationSystem()
 
 # 매수/매도 개수 추적
 trade_counts = {
@@ -1078,6 +1297,130 @@ def update_investment_with_profits(original_investment):
         return original_investment, 0
 
 
+def backup_logs_before_clear():
+    """데이터 초기화 전 로그 백업"""
+    try:
+        # backup 폴더 생성
+        backup_dir = Path("backup")
+        backup_dir.mkdir(exist_ok=True)
+        
+        # 현재 시간으로 백업 파일명 생성
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # 각 데이터 파일 백업
+        files_to_backup = [
+            ('trade_logs.json', f'trade_logs_{timestamp}.json'),
+            ('trading_state.json', f'trading_state_{timestamp}.json'),
+            ('profits.json', f'profits_{timestamp}.json')
+        ]
+        
+        backed_up_files = []
+        for source, backup_name in files_to_backup:
+            if os.path.exists(source):
+                backup_path = backup_dir / backup_name
+                shutil.copy2(source, backup_path)
+                backed_up_files.append(backup_name)
+                print(f"백업 완료: {source} → {backup_path}")
+        
+        # 백업 내역 로그 파일 생성
+        backup_info = {
+            'backup_time': timestamp,
+            'backed_up_files': backed_up_files,
+            'note': '데이터 초기화 전 자동 백업'
+        }
+        
+        with open(backup_dir / f'backup_info_{timestamp}.json', 'w', encoding='utf-8') as f:
+            json.dump(backup_info, f, indent=2, ensure_ascii=False)
+        
+        return len(backed_up_files)
+        
+    except Exception as e:
+        print(f"백업 오류: {e}")
+        raise
+
+def auto_backup_logs():
+    """정기 자동 백업 (매일 새벽)"""
+    try:
+        now = datetime.now()
+        # 매일 새벽 2시에 백업 (시장 종료 후)
+        if now.hour == 2 and now.minute == 0:
+            backup_dir = Path("backup/daily")
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            
+            date_str = now.strftime('%Y%m%d')
+            
+            # trade_logs.json이 존재하고 비어있지 않으면 백업
+            if os.path.exists('trade_logs.json'):
+                try:
+                    with open('trade_logs.json', 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    
+                    # 로그가 있으면 백업
+                    if data and any(logs for logs in data.values() if logs):
+                        backup_path = backup_dir / f'trade_logs_{date_str}.json'
+                        shutil.copy2('trade_logs.json', backup_path)
+                        print(f"일일 자동 백업 완료: {backup_path}")
+                        
+                        # 오래된 백업 파일 정리 (30일 이상)
+                        cleanup_old_backups(backup_dir, days=30)
+                        
+                except Exception as e:
+                    print(f"일일 백업 오류: {e}")
+                    
+    except Exception as e:
+        print(f"자동 백업 오류: {e}")
+
+def cleanup_old_backups(backup_dir, days=30):
+    """오래된 백업 파일 삭제"""
+    try:
+        cutoff_time = datetime.now() - timedelta(days=days)
+        
+        for file_path in backup_dir.glob('*.json'):
+            if file_path.stat().st_mtime < cutoff_time.timestamp():
+                file_path.unlink()
+                print(f"오래된 백업 파일 삭제: {file_path}")
+                
+    except Exception as e:
+        print(f"백업 파일 정리 오류: {e}")
+
+def restore_logs_from_backup():
+    """백업에서 로그 복구"""
+    try:
+        backup_dir = Path("backup")
+        if not backup_dir.exists():
+            messagebox.showwarning("백업 없음", "backup 폴더가 없습니다.")
+            return False
+        
+        # 백업 파일 목록 가져오기
+        backup_files = list(backup_dir.glob('trade_logs_*.json'))
+        daily_backup_files = list((backup_dir / 'daily').glob('trade_logs_*.json')) if (backup_dir / 'daily').exists() else []
+        
+        all_backup_files = backup_files + daily_backup_files
+        
+        if not all_backup_files:
+            messagebox.showwarning("백업 없음", "백업된 로그 파일이 없습니다.")
+            return False
+        
+        # 최신 백업 파일 선택
+        latest_backup = max(all_backup_files, key=lambda x: x.stat().st_mtime)
+        
+        # 복구 확인
+        confirm = messagebox.askyesno(
+            "로그 복구", 
+            f"최신 백업에서 로그를 복구하시겠습니까?\n\n백업 파일: {latest_backup.name}\n수정 시간: {datetime.fromtimestamp(latest_backup.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')}\n\n현재 로그는 덮어쓰여집니다."
+        )
+        
+        if confirm:
+            shutil.copy2(latest_backup, 'trade_logs.json')
+            messagebox.showinfo("복구 완료", f"로그가 성공적으로 복구되었습니다.\n\n복구된 파일: {latest_backup.name}")
+            return True
+            
+        return False
+        
+    except Exception as e:
+        messagebox.showerror("복구 오류", f"로그 복구 중 오류가 발생했습니다:\n{e}")
+        return False
+
 def export_to_excel(filename=None):
     """로그와 수익 데이터를 엑셀로 내보내기"""
     if filename is None:
@@ -1136,8 +1479,97 @@ def export_to_excel(filename=None):
 
 
     
+def safe_json_load(file_path, default_value=None):
+    """안전한 JSON 파일 로드 (백업 및 복구 기능 포함)"""
+    try:
+        if not os.path.exists(file_path):
+            return default_value if default_value is not None else {}
+        
+        # 파일 크기 검사
+        if os.path.getsize(file_path) == 0:
+            print(f"경고: {file_path} 파일이 비어있습니다. 기본값을 사용합니다.")
+            return default_value if default_value is not None else {}
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                return default_value if default_value is not None else {}
+            
+            data = json.loads(content)
+            return data
+            
+    except json.JSONDecodeError as e:
+        print(f"JSON 파싱 오류 ({file_path}): {e}")
+        # 손상된 파일 백업 시도
+        try:
+            backup_corrupted_file(file_path)
+        except:
+            pass
+        return default_value if default_value is not None else {}
+        
+    except UnicodeDecodeError as e:
+        print(f"인코딩 오류 ({file_path}): {e}")
+        try:
+            backup_corrupted_file(file_path)
+        except:
+            pass
+        return default_value if default_value is not None else {}
+        
+    except Exception as e:
+        print(f"파일 로드 오류 ({file_path}): {e}")
+        return default_value if default_value is not None else {}
+
+def safe_json_save(file_path, data):
+    """안전한 JSON 파일 저장 (임시 파일 사용)"""
+    try:
+        # 임시 파일에 먼저 저장
+        temp_file = f"{file_path}.tmp"
+        
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        
+        # 임시 파일이 정상적으로 저장되면 원본 파일로 이동
+        if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+            # 기존 파일 백업 (덧어쓰기 전)
+            if os.path.exists(file_path):
+                backup_file = f"{file_path}.backup"
+                shutil.copy2(file_path, backup_file)
+            
+            # 임시 파일을 원본 파일로 이동
+            shutil.move(temp_file, file_path)
+            return True
+        else:
+            print(f"경고: 임시 파일 생성 실패: {temp_file}")
+            return False
+            
+    except Exception as e:
+        print(f"JSON 저장 오류 ({file_path}): {e}")
+        # 임시 파일 정리
+        try:
+            if os.path.exists(f"{file_path}.tmp"):
+                os.remove(f"{file_path}.tmp")
+        except:
+            pass
+        return False
+
+def backup_corrupted_file(file_path):
+    """손상된 파일 백업"""
+    try:
+        backup_dir = Path("backup/corrupted")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = Path(file_path).name
+        backup_path = backup_dir / f"{filename}.corrupted_{timestamp}"
+        
+        shutil.copy2(file_path, backup_path)
+        print(f"손상된 파일 백업: {file_path} → {backup_path}")
+        
+    except Exception as e:
+        print(f"손상된 파일 백업 오류: {e}")
+
 def log_trade(ticker, action, price):
-    """거래 로그 기록 (파일 저장 전용)"""
+    """거래 로그 기록 (개선된 안전 버전)"""
     entry = {
         'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'action': action,
@@ -1145,23 +1577,22 @@ def log_trade(ticker, action, price):
     }
     
     try:
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
-            data = {}
+        # 안전한 로드
+        data = safe_json_load(log_file, {})
         
         if ticker not in data:
             data[ticker] = []
         data[ticker].append(entry)
         
-        with open(log_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        
-        return entry # GUI 업데이트를 위해 로그 항목 반환
+        # 안전한 저장
+        if safe_json_save(log_file, data):
+            return entry
+        else:
+            print(f"로그 저장 실패: {ticker} - {action}")
+            return None
             
     except Exception as e:
-        print(f"로그 파일 처리 중 오류 발생: {e}")
+        print(f"로그 기록 오류: {e}")
         return None
 
 # 급락 감지 및 대응 전략
@@ -1619,6 +2050,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     def update_gui(key, *args):
         gui_queue.put((key, ticker, args))
         
+        # 분배 현황 동기화
+        if key == 'allocation_info':
+            allocation_data = coin_allocation_system.allocation_cache
+            total_allocated = coin_allocation_system.get_total_allocated()
+            gui_queue.put(('allocation_display', ticker, (allocation_data, total_allocated)))
+        
     def log_and_update(action, price):
         log_entry = log_trade(ticker, action, price)
         if log_entry:
@@ -1810,13 +2247,47 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         save_trading_state(ticker, [], True)  # 빈 상태로 저장
         current_held_assets_value = 0
         invested_in_held_positions = 0
-        initial_capital = float(total_investment)
+        
+        # 코인별 투자금 분배 계산 (새 거래)
+        active_coins = [coin for coin in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'] 
+                       if config.get(f'trade_{coin.split("-")[1].lower()}', False)]
+        
+        # 그리드 설정 정보 수집
+        grid_configs = {}
+        for coin in active_coins:
+            try:
+                coin_high, coin_low = calculate_price_range(coin, period)
+                if coin_high and coin_low:
+                    coin_grid_count = calculate_optimal_grid_count(coin_high, coin_low, target_profit_percent, fee_rate, coin)
+                    grid_configs[coin] = {
+                        'count': coin_grid_count,
+                        'range': coin_high - coin_low,
+                        'high': coin_high,
+                        'low': coin_low
+                    }
+            except Exception as e:
+                print(f"그리드 설정 수집 오류 ({coin}): {e}")
+        
+        # 투자금 자동 분배
+        allocations = coin_allocation_system.calculate_optimal_allocation(
+            total_investment, active_coins, grid_configs
+        )
+        
+        # 현재 코인의 분배된 투자금 사용
+        allocated_investment = allocations.get(ticker, total_investment / len(active_coins) if active_coins else total_investment)
+        
+        log_and_update('투자금분배', f"총 투자금: {total_investment:,.0f}원 중 {allocated_investment:,.0f}원 ({allocated_investment/total_investment*100:.1f}%) 분배")
+        
+        # GUI에 분배 정보 업데이트
+        update_gui('allocation_info')
+        
+        initial_capital = float(allocated_investment)  # 분배된 투자금 사용
         current_cash_balance = initial_capital
         current_total_assets = initial_capital
         
-        # 그리드 간격 계산
+        # 그리드 간격 계산 (분배된 투자금 기준)
         price_gap = (high_price - low_price) / grid_count
-        amount_per_grid = total_investment / grid_count
+        amount_per_grid = allocated_investment / grid_count
         
         # 그리드 가격 레벨 생성
         grid_levels = []
@@ -1862,19 +2333,50 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     lowest_grid_to_buy = -1
 
     while not stop_event.is_set():
-        # 9시 정각 그리드 자동 갱신
+        # 9시 정각 그리드 자동 갱신 및 투자금 재분배
         now = datetime.now()
         if config.get('auto_grid_count', True) and now.hour == 9 and now.day != last_update_day:
-            log_and_update('정보', '오전 9시, 그리드 설정을 자동 갱신합니다.')
+            log_and_update('정보', '오전 9시, 그리드 설정 및 투자금 분배를 자동 갱신합니다.')
             
+            # 코인별 투자금 재분배
+            active_coins = [coin for coin in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'] 
+                           if config.get(f'trade_{coin.split("-")[1].lower()}', False)]
+            
+            # 그리드 설정 정보 업데이트
+            grid_configs = {}
+            for coin in active_coins:
+                try:
+                    coin_high, coin_low = calculate_price_range(coin, period)
+                    if coin_high and coin_low:
+                        coin_grid_count = calculate_optimal_grid_count(coin_high, coin_low, target_profit_percent, fee_rate, coin)
+                        grid_configs[coin] = {
+                            'count': coin_grid_count,
+                            'range': coin_high - coin_low,
+                            'high': coin_high,
+                            'low': coin_low
+                        }
+                except Exception as e:
+                    print(f"그리드 설정 업데이트 오류 ({coin}): {e}")
+            
+            # 투자금 재분배 (수익 포함 전체 투자금 기준)
+            current_total_investment = calculate_total_investment_with_profits()
+            new_allocations = coin_allocation_system.rebalance_allocations(
+                current_total_investment, active_coins, grid_configs
+            )
+            
+            # 현재 코인의 새로운 분배 금액
+            new_allocated_investment = new_allocations.get(ticker, current_total_investment / len(active_coins) if active_coins else current_total_investment)
+            
+            # 그리드 설정 업데이트
             new_high, new_low = calculate_price_range(ticker, period)
             if new_high and new_low:
                 high_price, low_price = new_high, new_low
                 grid_count = calculate_optimal_grid_count(high_price, low_price, target_profit_percent, fee_rate, ticker)
                 price_gap = (high_price - low_price) / grid_count
+                amount_per_grid = new_allocated_investment / grid_count  # 새로운 분배 금액 기준
                 grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
                 
-                log_and_update('설정 갱신', f"새 그리드: {grid_count}개, 범위: {low_price:,.0f}~{high_price:,.0f}")
+                log_and_update('설정갱신', f"새 그리드: {grid_count}개, 범위: {low_price:,.0f}~{high_price:,.0f}, 격당투자: {amount_per_grid:,.0f}원")
                 update_gui('chart_data', high_price, low_price, grid_levels)
             
             last_update_day = now.day
@@ -3401,9 +3903,38 @@ def start_dashboard():
     ttk.Button(button_row1, text="🗑️ 데이터 초기화", 
                command=lambda: clear_all_data(None, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits)).pack(side='left', padx=(5, 5))
     ttk.Button(button_row1, text="📊 거래 로그", 
-               command=show_trading_log_popup).pack(side='left', padx=(5, 0))
+               command=show_trading_log_popup).pack(side='left', padx=(5, 2))
+    ttk.Button(button_row1, text="🔄 로그 복구", 
+               command=restore_logs_from_backup).pack(side='left', padx=(2, 0))
 
     def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits):
+        # 안전 장치: 2단계 확인
+        confirm1 = messagebox.askquestion(
+            "데이터 초기화 경고", 
+            "⚠️ 주의: 모든 거래 데이터가 영구적으로 \n삭제됩니다. (거래로그, 수익데이터, 포지션)\n\n정말로 초기화하시겠습니까?",
+            icon='warning'
+        )
+        
+        if confirm1 != 'yes':
+            return
+        
+        # 2차 확인: 더 엄격한 경고
+        confirm2 = messagebox.askquestion(
+            "최종 확인", 
+            "🚨 마지막 경고!\n\n이 작업은 되돌릴 수 없습니다.\n다음 데이터가 완전히 삭제됩니다:\n\n• 모든 거래 로그\n• 수익 데이터\n• 현재 포지션\n\n정말로 계속하시겠습니까?",
+            icon='error'
+        )
+        
+        if confirm2 != 'yes':
+            return
+        
+        # 로그 백업 생성
+        try:
+            backup_logs_before_clear()
+            messagebox.showinfo("백업 완료", "기존 로그가 'backup' 폴더에 백업되었습니다.")
+        except Exception as e:
+            print(f"백업 오류: {e}")
+        
         # log_tree는 더 이상 사용하지 않음 (팝업으로 대체)
 
         # 2. 각 티커별 상세 정보 초기화
@@ -3928,9 +4459,23 @@ def start_dashboard():
     chart_refresh_btn = ttk.Button(mid_frame, text="차트 새로고침", command=refresh_charts)
     chart_refresh_btn.pack(pady=5)
 
+    # 자동 백업 스케줄러 시작
+    def periodic_backup_check():
+        """1분마다 자동 백업 검사"""
+        try:
+            auto_backup_logs()
+        except Exception as e:
+            print(f"자동 백업 검사 오류: {e}")
+        finally:
+            # 1분 후 다시 검사
+            root.after(60000, periodic_backup_check)
+    
     # 초기화
     process_gui_queue()
     initialize_upbit()  # 업비트 API 초기화
+    
+    # 자동 백업 시작
+    root.after(5000, periodic_backup_check)  # 5초 후 시작
     
     # 초기 차트 로드
     root.after(1000, refresh_charts)
