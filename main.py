@@ -165,7 +165,10 @@ class AutoTradingSystem:
             "total_profit": 0.0,
             "max_drawdown": 0.0,
             "last_optimization": None,
-            "hourly_performance": []
+            "hourly_performance": [],
+            "volatility_score": 0.0,
+            "trend_strength": 0.0,
+            "portfolio_risk": 0.0
         }
     
     def get_risk_settings(self, risk_mode):
@@ -173,19 +176,24 @@ class AutoTradingSystem:
         return self.risk_profiles.get(risk_mode, self.risk_profiles["안정적"])
     
     def analyze_performance(self, trades_data):
-        """거래 실적 분석"""
+        """고급 거래 실적 분석"""
         if not trades_data:
             return {"status": "insufficient_data"}
         
         # 최근 24시간 거래 분석
         recent_trades = [t for t in trades_data if self._is_recent_trade(t, 24)]
         
-        if len(recent_trades) < 5:
+        if len(recent_trades) < 3:  # 최소 요구 거래 수 감소
             return {"status": "insufficient_recent_data"}
         
         win_rate = len([t for t in recent_trades if t.get('profit', 0) > 0]) / len(recent_trades)
         avg_profit = sum(t.get('profit', 0) for t in recent_trades) / len(recent_trades)
         total_profit = sum(t.get('profit', 0) for t in recent_trades)
+        
+        # 시장 변동성 분석
+        volatility_score = self._calculate_market_volatility()
+        trend_strength = self._calculate_trend_strength()
+        drawdown_ratio = self._calculate_current_drawdown()
         
         return {
             "status": "success",
@@ -193,7 +201,10 @@ class AutoTradingSystem:
             "avg_profit": avg_profit,
             "total_profit": total_profit,
             "trade_count": len(recent_trades),
-            "recommendation": self._get_recommendation(win_rate, avg_profit)
+            "volatility_score": volatility_score,
+            "trend_strength": trend_strength,
+            "drawdown_ratio": drawdown_ratio,
+            "recommendation": self._get_advanced_recommendation(win_rate, avg_profit, volatility_score, trend_strength, drawdown_ratio)
         }
     
     def _is_recent_trade(self, trade, hours):
@@ -205,17 +216,111 @@ class AutoTradingSystem:
         except:
             return False
     
-    def _get_recommendation(self, win_rate, avg_profit):
-        """실적 기반 추천"""
-        if win_rate > 0.7 and avg_profit > 1000:
-            return "increase_aggression"  # 공격성 증가
-        elif win_rate < 0.4 or avg_profit < -500:
-            return "decrease_aggression"  # 공격성 감소
+    def _calculate_market_volatility(self):
+        """시장 변동성 계산"""
+        try:
+            tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+            volatilities = []
+            
+            for ticker in tickers:
+                df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+                if df is not None and len(df) > 1:
+                    price_changes = df['close'].pct_change().abs()
+                    volatility = price_changes.std() * 100
+                    volatilities.append(volatility)
+            
+            return sum(volatilities) / len(volatilities) if volatilities else 0.0
+        except:
+            return 0.0
+    
+    def _calculate_trend_strength(self):
+        """트렌드 강도 계산"""
+        try:
+            tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+            trend_scores = []
+            
+            for ticker in tickers:
+                df = pyupbit.get_ohlcv(ticker, interval='minute60', count=12)
+                if df is not None and len(df) > 6:
+                    recent_change = (df['close'].iloc[-1] - df['close'].iloc[-6]) / df['close'].iloc[-6]
+                    trend_scores.append(abs(recent_change))
+            
+            return sum(trend_scores) / len(trend_scores) if trend_scores else 0.0
+        except:
+            return 0.0
+    
+    def _calculate_current_drawdown(self):
+        """현재 드로다운 비율 계산"""
+        try:
+            total_unrealized_loss = 0
+            total_investment_value = 0
+            
+            for ticker in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']:
+                positions = load_trading_state(ticker, demo_mode=True)
+                current_price = pyupbit.get_current_price(ticker)
+                
+                if positions and current_price:
+                    for pos in positions:
+                        buy_price = pos.get('buy_price', 0)
+                        quantity = pos.get('quantity', 0)
+                        
+                        current_value = quantity * current_price
+                        buy_value = quantity * buy_price
+                        
+                        total_investment_value += buy_value
+                        if current_value < buy_value:
+                            total_unrealized_loss += (buy_value - current_value)
+            
+            return total_unrealized_loss / total_investment_value if total_investment_value > 0 else 0.0
+        except:
+            return 0.0
+    
+    def _get_advanced_recommendation(self, win_rate, avg_profit, volatility, trend_strength, drawdown):
+        """고급 다요소 기반 추천 시스템"""
+        score = 0
+        
+        # 승률 가중치 (40%)
+        if win_rate > 0.7:
+            score += 40
+        elif win_rate > 0.5:
+            score += 20
+        elif win_rate < 0.3:
+            score -= 30
+        
+        # 평균 수익 가중치 (30%)
+        if avg_profit > 2000:
+            score += 30
+        elif avg_profit > 500:
+            score += 15
+        elif avg_profit < -1000:
+            score -= 25
+        
+        # 변동성 고려 (15%)
+        if volatility > 3.0:  # 고변동성
+            score -= 15
+        elif volatility < 1.0:  # 저변동성
+            score += 10
+        
+        # 드로다운 리스크 (15%)
+        if drawdown > 0.1:  # 10% 이상 드로다운
+            score -= 20
+        elif drawdown > 0.05:  # 5% 이상 드로다운
+            score -= 10
+        
+        # 최종 추천 결정
+        if score >= 30:
+            return "increase_aggression_strong"
+        elif score >= 10:
+            return "increase_aggression_mild"
+        elif score >= -10:
+            return "maintain"
+        elif score >= -30:
+            return "decrease_aggression_mild"
         else:
-            return "maintain"  # 현재 유지
+            return "decrease_aggression_strong"
     
     def optimize_parameters(self, current_config, performance_analysis):
-        """실적 기반 파라미터 자동 최적화"""
+        """고급 다요소 기반 파라미터 자동 최적화"""
         if performance_analysis["status"] != "success":
             return current_config
         
@@ -223,18 +328,34 @@ class AutoTradingSystem:
         recommendation = performance_analysis["recommendation"]
         current_risk = current_config.get("risk_mode", "안정적")
         
-        # 리스크 모드 자동 조정
+        # 리스크 모드 자동 조정 (더 세밀한 단계별 조정)
         risk_modes = ["보수적", "안정적", "공격적", "극공격적"]
         current_index = risk_modes.index(current_risk) if current_risk in risk_modes else 1
         
-        if recommendation == "increase_aggression" and current_index < 3:
-            new_risk_mode = risk_modes[current_index + 1]
-            optimized_config["risk_mode"] = new_risk_mode
-            print(f"실적 우수로 리스크 모드 상향 조정: {current_risk} → {new_risk_mode}")
-        elif recommendation == "decrease_aggression" and current_index > 0:
-            new_risk_mode = risk_modes[current_index - 1]
-            optimized_config["risk_mode"] = new_risk_mode
-            print(f"실적 부진으로 리스크 모드 하향 조정: {current_risk} → {new_risk_mode}")
+        if "increase_aggression" in recommendation:
+            if "strong" in recommendation and current_index < 3:
+                # 강한 상향 신호: 2단계 상향 (최대 극공격적까지)
+                new_index = min(current_index + 2, 3)
+                new_risk_mode = risk_modes[new_index]
+                optimized_config["risk_mode"] = new_risk_mode
+                print(f"실적 매우 우수 - 리스크 모드 강한 상향: {current_risk} → {new_risk_mode}")
+            elif "mild" in recommendation and current_index < 3:
+                # 온화한 상햦 신호: 1단계 상향
+                new_risk_mode = risk_modes[current_index + 1]
+                optimized_config["risk_mode"] = new_risk_mode
+                print(f"실적 우수 - 리스크 모드 온화한 상향: {current_risk} → {new_risk_mode}")
+        elif "decrease_aggression" in recommendation:
+            if "strong" in recommendation and current_index > 0:
+                # 강한 하향 신호: 2단계 하향 (최소 보수적까지)
+                new_index = max(current_index - 2, 0)
+                new_risk_mode = risk_modes[new_index]
+                optimized_config["risk_mode"] = new_risk_mode
+                print(f"실적 매우 부진 - 리스크 모드 강한 하향: {current_risk} → {new_risk_mode}")
+            elif "mild" in recommendation and current_index > 0:
+                # 온화한 하향 신호: 1단계 하향
+                new_risk_mode = risk_modes[current_index - 1]
+                optimized_config["risk_mode"] = new_risk_mode
+                print(f"실적 부진 - 리스크 모드 온화한 하향: {current_risk} → {new_risk_mode}")
         
         # 리스크 프로필에 따른 설정 적용
         risk_settings = self.get_risk_settings(optimized_config["risk_mode"])
@@ -246,15 +367,84 @@ class AutoTradingSystem:
             "grid_confirmation_buffer": risk_settings["grid_confirmation_buffer"]
         })
         
-        # 승률에 따른 세부 조정
+        # 동적 파라미터 조정
+        volatility = performance_analysis.get("volatility_score", 0)
+        drawdown = performance_analysis.get("drawdown_ratio", 0)
         win_rate = performance_analysis["win_rate"]
+        
+        # 변동성에 따른 그리드 버퍼 조정
+        if volatility > 3.0:  # 고변동성
+            optimized_config["grid_confirmation_buffer"] *= 1.3
+        elif volatility < 1.0:  # 저변동성
+            optimized_config["grid_confirmation_buffer"] *= 0.8
+        
+        # 드로다운에 따른 리스크 조정
+        if drawdown > 0.1:  # 10% 이상 드로다운
+            optimized_config["stop_loss_threshold"] = risk_settings["stop_loss_threshold"] * 0.7  # 손절 기준 강화
+            optimized_config["trailing_stop_percent"] = risk_settings["trailing_stop_percent"] * 1.5  # 트레일링 스톱 강화
+        
+        # 승률에 따른 세밀 조정
         if win_rate > 0.8:  # 매우 높은 승률
-            optimized_config["grid_confirmation_buffer"] *= 0.8  # 버퍼 감소로 더 적극적
+            optimized_config["grid_confirmation_buffer"] *= 0.7  # 버퍼 강한 감소
         elif win_rate < 0.3:  # 매우 낮은 승률
-            optimized_config["grid_confirmation_buffer"] *= 1.5  # 버퍼 증가로 더 신중
+            optimized_config["grid_confirmation_buffer"] *= 1.8  # 버퍼 강한 증가
+        
+        # 동적 그리드 수 조정 (시장 상황에 따라)
+        trend_strength = performance_analysis.get("trend_strength", 0)
+        if trend_strength > 0.05:  # 강한 트렌드
+            optimized_config["max_grid_count"] = int(risk_settings["max_grid_count"] * 1.2)  # 그리드 수 증가
+        elif trend_strength < 0.01:  # 약한 트렌드
+            optimized_config["max_grid_count"] = int(risk_settings["max_grid_count"] * 0.8)  # 그리드 수 감소
         
         optimized_config["last_optimization"] = datetime.now().isoformat()
+        # 동적 그리드 수 조정 로직 추가
+        optimized_config = self.dynamic_grid_adjustment(optimized_config, performance_analysis)
+        
         return optimized_config
+    
+    def dynamic_grid_adjustment(self, config, performance_analysis):
+        """시장 상황에 따른 동적 그리드 수 조정"""
+        try:
+            volatility = performance_analysis.get('volatility_score', 0)
+            trend_strength = performance_analysis.get('trend_strength', 0)
+            win_rate = performance_analysis.get('win_rate', 0)
+            
+            # 기본 그리드 수 가져오기
+            base_grid_count = config.get('max_grid_count', 20)
+            
+            # 조정 계수 계산
+            adjustment_factor = 1.0
+            
+            # 1. 변동성에 따른 조정
+            if volatility > 3.0:  # 고변동성 - 그리드 수 증가
+                adjustment_factor *= 1.3
+            elif volatility < 1.0:  # 저변동성 - 그리드 수 감소
+                adjustment_factor *= 0.7
+            
+            # 2. 트렌드 강도에 따른 조정
+            if trend_strength > 0.05:  # 강한 트렌드 - 그리드 수 증가
+                adjustment_factor *= 1.2
+            elif trend_strength < 0.01:  # 약한 트렌드 - 그리드 수 감소
+                adjustment_factor *= 0.8
+            
+            # 3. 승률에 따른 조정
+            if win_rate > 0.7:  # 높은 승률 - 더 적극적
+                adjustment_factor *= 1.1
+            elif win_rate < 0.4:  # 낮은 승률 - 더 보수적
+                adjustment_factor *= 0.9
+            
+            # 최종 그리드 수 계산 (최소 5, 최대 50)
+            new_grid_count = max(5, min(50, int(base_grid_count * adjustment_factor)))
+            
+            if new_grid_count != base_grid_count:
+                config['max_grid_count'] = new_grid_count
+                print(f"동적 그리드 수 조정: {base_grid_count} → {new_grid_count} (변동성: {volatility:.1f}, 트렌드: {trend_strength:.3f}, 승률: {win_rate:.1%})")
+            
+            return config
+            
+        except Exception as e:
+            print(f"동적 그리드 조정 오류: {e}")
+            return config
 
 # 글로벌 자동 거래 시스템 인스턴스
 auto_trading_system = AutoTradingSystem()
@@ -589,11 +779,11 @@ def calculate_total_realized_profit():
         return 0
 
 def check_and_sell_profitable_positions(ticker, demo_mode=True):
-    """수익권 포지션 확인 및 자동 매도"""
+    """고급 수익권 포지션 확인 및 리스크 기반 자동 매도"""
     try:
         positions = load_trading_state(ticker, demo_mode)
         if not positions:
-            return 0, 0  # 매도 수량, 수익금
+            return 0, 0
         
         current_price = pyupbit.get_current_price(ticker)
         if current_price is None:
@@ -603,28 +793,57 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
         total_profit = 0
         remaining_positions = []
         
+        # 리스크 설정 가져오기
+        risk_settings = auto_trading_system.get_risk_settings(config.get('risk_mode', '안정적'))
+        trailing_stop_percent = risk_settings.get('trailing_stop_percent', 2.0)
+        stop_loss_threshold = risk_settings.get('stop_loss_threshold', -8.0)
+        
         for position in positions:
             buy_price = position.get('buy_price', 0)
             quantity = position.get('quantity', 0)
+            highest_price = position.get('highest_price', buy_price)
             
-            # 현재 가격이 매수 가격보다 높으면 (수익권)
-            if current_price > buy_price:
+            # 최고가 업데이트
+            if current_price > highest_price:
+                position['highest_price'] = current_price
+                highest_price = current_price
+            
+            profit_rate = (current_price - buy_price) / buy_price * 100
+            trailing_stop_price = highest_price * (1 - trailing_stop_percent / 100)
+            
+            should_sell = False
+            sell_reason = ""
+            
+            # 1. 손절 로직 (우선순위 최고)
+            if profit_rate <= stop_loss_threshold:
+                should_sell = True
+                sell_reason = f"손절({profit_rate:.1f}%)"
+            
+            # 2. 트레일링 스톱 (수익권에서만 작동)
+            elif profit_rate > 1.0 and current_price <= trailing_stop_price:
+                should_sell = True
+                sell_reason = f"트레일링스톱({profit_rate:.1f}%)"
+            
+            # 3. 기본 수익 실현 (기존 로직)
+            elif current_price > buy_price * 1.005:  # 0.5% 이상 수익시
+                should_sell = True
+                sell_reason = f"수익실현({profit_rate:.1f}%)"
+            
+            if should_sell:
                 # 매도 처리
                 sell_value = quantity * current_price
                 buy_value = quantity * buy_price
-                profit = sell_value - buy_value - (sell_value * 0.0005)  # 수수료 차감
+                profit = sell_value - buy_value - (sell_value * 0.0005)
                 
                 total_sold_quantity += quantity
                 total_profit += profit
                 
-                # 거래 로그 기록
-                log_trade(ticker, "수익 실현 매도", f"{current_price:,.0f}원 ({quantity:.6f}개) 수익: {profit:,.0f}원")
+                log_trade(ticker, sell_reason, f"{current_price:,.0f}원 ({quantity:.6f}개) 수익: {profit:,.0f}원")
                 
                 korean_name = get_korean_coin_name(ticker)
-                speak_async(f"{korean_name} 수익 실현 매도 완료")
-                
+                speak_async(f"{korean_name} {sell_reason} 매도 완료")
             else:
-                # 손실권은 유지
+                # 유지 (최고가 업데이트된 포지션 저장)
                 remaining_positions.append(position)
         
         # 남은 포지션 저장
@@ -1260,7 +1479,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         
         # 투자금액 조정 (리스크에 따라)
         max_investment_ratio = risk_settings['max_investment_ratio']
-        adjusted_investment = total_investment * max_investment_ratio
+        total_investment = total_investment * max_investment_ratio  # 이미 사용되는 변수를 직접 업데이트
         
         log_and_update('자동모드', f"리스크 모드: {config.get('risk_mode')}, 투자비율: {max_investment_ratio*100:.0f}%")
         
@@ -1489,6 +1708,75 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         
         # 고급 그리드 상태 업데이트
         advanced_grid_state.add_price_history(price)
+        
+        # 최고가 업데이트 (트레일링 스톱용)
+        if demo_mode:
+            current_held_assets_value = sum(pos['quantity'] * price for pos in demo_positions)
+            current_total_value = (demo_balance - total_invested) + current_held_assets_value
+            
+            if current_total_value > highest_value:
+                highest_value = current_total_value
+        
+        # 자동 리스크 관리 (자동모드에서만 작동)
+        if config.get('auto_trading_mode', False) and demo_positions:
+            risk_settings = auto_trading_system.get_risk_settings(config.get('risk_mode', '안정적'))
+            
+            # 1. 포트폴리오 전체 손절 검사
+            total_unrealized_loss = 0
+            total_investment_value = 0
+            
+            for pos in demo_positions:
+                buy_value = pos['quantity'] * pos['buy_price']
+                current_value = pos['quantity'] * price
+                total_investment_value += buy_value
+                
+                if current_value < buy_value:
+                    total_unrealized_loss += (buy_value - current_value)
+            
+            if total_investment_value > 0:
+                portfolio_loss_ratio = total_unrealized_loss / total_investment_value
+                
+                # 포트폴리오 전체 손절 대응
+                if portfolio_loss_ratio > abs(risk_settings['stop_loss_threshold']) / 100:
+                    log_and_update('포트폴리오손절', f'전체 손실 {portfolio_loss_ratio:.1%} - 모든 포지션 정리')
+                    
+                    # 모든 포지션 강제 매도
+                    for pos in demo_positions:
+                        sell_value = pos['quantity'] * price
+                        buy_value = pos['quantity'] * pos['buy_price']
+                        loss = sell_value - buy_value - (sell_value * 0.0005)
+                        total_realized_profit += loss
+                        
+                        log_trade(ticker, "포트폴리오손절", f"{price:,.0f}원 ({pos['quantity']:.6f}개) 손실: {loss:,.0f}원")
+                    
+                    demo_positions = []  # 모든 포지션 정리
+                    save_trading_state(ticker, demo_positions, demo_mode)
+                    
+                    speak_async(f"{get_korean_coin_name(ticker)} 포트폴리오 손절 실행")
+                    send_kakao_message(f"{get_korean_coin_name(ticker)} 포트폴리오 손절: 전체 포지션 정리")
+            
+            # 2. 트레일링 스톱 검사 (수익권에서만)
+            if demo_mode and current_total_value > start_balance:
+                trailing_stop_percent = risk_settings.get('trailing_stop_percent', 2.0)
+                trailing_stop_price = highest_value * (1 - trailing_stop_percent / 100)
+                
+                if current_total_value <= trailing_stop_price:
+                    log_and_update('트레일링스톱', f'최고점 {highest_value:,.0f}원에서 {trailing_stop_percent}% 하락 - 전체 매도')
+                    
+                    # 모든 포지션 매도
+                    for pos in demo_positions:
+                        sell_value = pos['quantity'] * price
+                        buy_value = pos['quantity'] * pos['buy_price']
+                        profit = sell_value - buy_value - (sell_value * 0.0005)
+                        total_realized_profit += profit
+                        
+                        log_trade(ticker, "트레일링스톱", f"{price:,.0f}원 ({pos['quantity']:.6f}개) 수익: {profit:,.0f}원")
+                    
+                    demo_positions = []
+                    save_trading_state(ticker, demo_positions, demo_mode)
+                    
+                    speak_async(f"{get_korean_coin_name(ticker)} 트레일링 스톱 실행")
+                    send_kakao_message(f"{get_korean_coin_name(ticker)} 트레일링 스톱: 전체 수익 실현")
         
         # 급락 상황 감지
         new_panic_mode = detect_panic_selling(price, previous_prices, config.get("panic_threshold", -5.0))
