@@ -2323,7 +2323,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         total_invested = 0
     
     prev_price = current_price
-    update_gui('chart_data', high_price, low_price, grid_levels)
+    update_gui('chart_data', high_price, low_price, grid_levels, grid_count, allocated_investment if 'allocated_investment' in locals() else total_investment)
     
     total_realized_profit = 0
     last_update_day = datetime.now().day
@@ -2377,7 +2377,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
                 
                 log_and_update('설정갱신', f"새 그리드: {grid_count}개, 범위: {low_price:,.0f}~{high_price:,.0f}, 격당투자: {amount_per_grid:,.0f}원")
-                update_gui('chart_data', high_price, low_price, grid_levels)
+                update_gui('chart_data', high_price, low_price, grid_levels, grid_count, new_allocated_investment)
             
             last_update_day = now.day
 
@@ -2509,7 +2509,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             new_low, new_high = calculate_dynamic_grid(low_price, high_price, price, True)
             new_price_gap = (new_high - new_low) / grid_count
             grid_levels = [new_low + (new_price_gap * i) for i in range(grid_count + 1)]
-            update_gui('chart_data', new_high, new_low, grid_levels)
+            current_investment = amount_per_grid * grid_count if 'amount_per_grid' in locals() else total_investment
+            update_gui('chart_data', new_high, new_low, grid_levels, grid_count, current_investment)
             
         panic_mode = new_panic_mode
 
@@ -4274,12 +4275,37 @@ def start_dashboard():
         
         # 그리드 라인 그리기
         if ticker in chart_data:
-            high_price, low_price, grid_levels = chart_data[ticker]
+            chart_info = chart_data[ticker]
+            if len(chart_info) >= 5:
+                high_price, low_price, grid_levels, grid_count_info, allocated_amount = chart_info
+            else:
+                high_price, low_price, grid_levels = chart_info[:3]
+                grid_count_info = len(grid_levels) - 1 if grid_levels else 0
+                allocated_amount = 0
+            
             for level in grid_levels:
                 ax.axhline(y=level, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
             
-            ax.axhline(y=high_price, color='green', linestyle='-', alpha=0.8, linewidth=1, label='상한선')
-            ax.axhline(y=low_price, color='red', linestyle='-', alpha=0.8, linewidth=1, label='하한선')
+            ax.axhline(y=high_price, color='green', linestyle='-', alpha=0.8, linewidth=1, label=f'상한선 ({high_price:,.0f})')
+            ax.axhline(y=low_price, color='red', linestyle='-', alpha=0.8, linewidth=1, label=f'하한선 ({low_price:,.0f})')
+            
+            # 그리드 정보 표시
+            if grid_count_info > 0:
+                grid_gap = (high_price - low_price) / grid_count_info if grid_count_info > 0 else 0
+                info_text = f'그리드: {grid_count_info}개 | 간격: {grid_gap:,.0f}원'
+                if allocated_amount > 0:
+                    amount_per_grid = allocated_amount / grid_count_info if grid_count_info > 0 else 0
+                    info_text += f'\n총투자: {allocated_amount:,.0f}원 | 격당: {amount_per_grid:,.0f}원'
+                    
+                    # 분배 비율 표시 (총 투자금 대비)
+                    if hasattr(coin_allocation_system, 'get_total_allocated') and coin_allocation_system.get_total_allocated() > 0:
+                        total_allocated = coin_allocation_system.get_total_allocated()
+                        allocation_ratio = (allocated_amount / total_allocated) * 100 if total_allocated > 0 else 0
+                        info_text += f' | 분배: {allocation_ratio:.1f}%'
+                        
+                ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
+                       fontsize=8, verticalalignment='top', fontweight='bold')
 
         # 거래 기록 표시
         trade_points = {'buy': [], 'sell': [], 'hold_buy': [], 'hold_sell': []}
@@ -4434,8 +4460,12 @@ def start_dashboard():
                     total_profit_label.config(text=f'총 실현수익: {overall_profit:,.0f}원', style=get_profit_color_style(overall_profit))
                     total_profit_rate_label.config(text=f'총 실현수익률: ({overall_profit_percent:+.2f}%)', style=get_profit_color_style(overall_profit))
                 elif key == 'chart_data':
-                    high_price, low_price, grid_levels = args
-                    chart_data[ticker] = (high_price, low_price, grid_levels)
+                    if len(args) >= 5:
+                        high_price, low_price, grid_levels, grid_count_info, allocated_amount = args
+                        chart_data[ticker] = (high_price, low_price, grid_levels, grid_count_info, allocated_amount)
+                    else:
+                        high_price, low_price, grid_levels = args
+                        chart_data[ticker] = (high_price, low_price, grid_levels, 0, 0)
                     current_period = period_combo.get()
                     update_chart(ticker, current_period)
                 elif key == 'refresh_chart':
