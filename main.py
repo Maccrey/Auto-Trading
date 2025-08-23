@@ -268,9 +268,14 @@ class CoinSpecificGridManager:
     def calculate_optimal_grid_count(self, ticker, price_range, total_investment, current_price=None):
         """코인별 최적 그리드 수 계산 (자동 최적화 포함)"""
         try:
+            auto_mode = config.get('auto_trading_mode', False)
+            coin_name = get_korean_coin_name(ticker)
+            print(f"⚙️ {coin_name} 그리드 계산 - 자동모드: {auto_mode}")
+            
             # 자동 모드에서는 고급 최적화 알고리즘 사용
-            if config.get('auto_trading_mode', False):
+            if auto_mode:
                 _, optimal_grid_count = self.find_optimal_period_and_grid(ticker)
+                print(f"⚙️ {coin_name} 자동 그리드: {optimal_grid_count}개")
                 return optimal_grid_count
                 
             # 수동 모드에서는 기존 로직 사용
@@ -308,17 +313,26 @@ class CoinSpecificGridManager:
     def get_price_range_days(self, ticker):
         """코인별 가격 범위 계산 기간 반환 (자동 최적화 포함)"""
         # 자동 모드에서는 최적 기간 계산
-        if config.get('auto_trading_mode', False):
+        auto_mode = config.get('auto_trading_mode', False)
+        coin_name = get_korean_coin_name(ticker)
+        print(f"📊 {coin_name} 기간 계산 - 자동모드: {auto_mode}")
+        
+        if auto_mode:
             optimal_period, _ = self.find_optimal_period_and_grid(ticker)
             return optimal_period
         
         # 수동 모드에서는 설정된 기간 사용
         coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
-        return coin_config.get('price_range_days', 7)
+        manual_period = coin_config.get('price_range_days', 7)
+        print(f"📊 {coin_name} 수동 기간: {manual_period}일")
+        return manual_period
     
     def find_optimal_period_and_grid(self, ticker):
         """최적의 기간과 그리드 개수를 찾는 고급 알고리즘 (백테스팅 포함)"""
         try:
+            coin_name = get_korean_coin_name(ticker)
+            print(f"🔍 {coin_name} 자동 최적화 시작...")
+            
             # 여러 기간을 테스트
             test_periods = [3, 5, 7, 10, 14, 21, 30]
             best_score = -1
@@ -403,6 +417,45 @@ class CoinSpecificGridManager:
         except Exception as e:
             print(f"최적 기간 계산 오류: {e}")
             return 7, 20
+    
+    def force_optimization_for_all_coins(self):
+        """모든 코인에 대해 강제로 최적화 실행"""
+        tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+        print("🚀 전체 코인 자동 최적화 강제 실행 시작...")
+        
+        # 최적화 결과를 저장할 딕셔너리
+        optimization_results = {}
+        
+        for ticker in tickers:
+            try:
+                optimal_period, optimal_grid = self.find_optimal_period_and_grid(ticker)
+                coin_name = get_korean_coin_name(ticker)
+                print(f"✅ {coin_name}: {optimal_period}일/{optimal_grid}그리드")
+                
+                # 결과 저장
+                optimization_results[ticker] = {
+                    'period': optimal_period,
+                    'grid_count': optimal_grid
+                }
+                
+                # config에도 업데이트 (차트 제목 반영용)
+                if 'coin_specific_grids' not in config:
+                    config['coin_specific_grids'] = {}
+                if ticker not in config['coin_specific_grids']:
+                    config['coin_specific_grids'][ticker] = {}
+                    
+                config['coin_specific_grids'][ticker]['price_range_days'] = optimal_period
+                config['coin_specific_grids'][ticker]['grid_count'] = optimal_grid
+                
+            except Exception as e:
+                print(f"❌ {ticker} 최적화 실패: {e}")
+        
+        print("🚀 전체 코인 자동 최적화 완료!")
+        
+        # 설정 저장
+        save_config(config)
+        
+        return optimization_results
     
     def _simulate_grid_performance(self, ticker, period, grid_count, high_price, low_price):
         """그리드 성능 시뮬레이션 (간단한 백테스팅)"""
@@ -884,8 +937,10 @@ class AutoOptimizationScheduler:
     def start_auto_optimization(self, update_callback):
         """자동 최적화 스레드 시작"""
         if self.optimization_thread and self.optimization_thread.is_alive():
+            print("⚠️ 자동 최적화 스레드가 이미 실행 중입니다")
             return
             
+        print("🎯 자동 최적화 스레드 시작 중...")
         self.stop_optimization = False
         self.optimization_thread = threading.Thread(
             target=self._optimization_worker, 
@@ -893,6 +948,7 @@ class AutoOptimizationScheduler:
             daemon=True
         )
         self.optimization_thread.start()
+        print("✅ 자동 최적화 스레드 시작 완료")
         
     def stop_auto_optimization(self):
         """자동 최적화 스레드 중지"""
@@ -902,57 +958,79 @@ class AutoOptimizationScheduler:
     
     def _optimization_worker(self, update_callback):
         """자동 최적화 작업자"""
+        print(f"🤖 자동 최적화 워커 시작 - 간격: {config.get('auto_update_interval', 60)}분")
+        
         while not self.stop_optimization:
             try:
                 # 설정에서 간격 확인
                 interval_minutes = config.get('auto_update_interval', 60)
+                print(f"⏰ 다음 최적화까지 {interval_minutes}분 대기 시작...")
                 
                 # 간격만큼 대기 (10초씩 체크하여 중단 신호 확인)
-                for _ in range(int(interval_minutes * 6)):  # 60분 = 360 * 10초
+                for i in range(int(interval_minutes * 6)):  # 60분 = 360 * 10초
                     if self.stop_optimization:
+                        print("🛑 최적화 워커 중단 신호 수신")
                         return
                     time.sleep(10)
+                    
+                    # 매 5분마다 상태 출력 (30회 = 5분)
+                    if (i + 1) % 30 == 0:
+                        remaining_minutes = (interval_minutes * 6 - i - 1) / 6
+                        print(f"⏱️ 최적화까지 약 {remaining_minutes:.1f}분 남음")
+                
+                print(f"🔍 자동 최적화 실행 조건 체크...")
+                print(f"  - 자동 모드: {config.get('auto_trading_mode', False)}")
+                print(f"  - 자동 최적화: {config.get('auto_optimization', True)}")
                 
                 # 자동 거래 모드가 활성화된 경우에만 최적화 실행
                 if config.get('auto_trading_mode', False) and config.get('auto_optimization', True):
+                    print("✅ 조건 만족 - 자동 최적화 실행")
                     self._perform_optimization(update_callback)
+                else:
+                    print("❌ 조건 불만족 - 최적화 건너뜀")
                     
             except Exception as e:
-                print(f"자동 최적화 오류: {e}")
+                print(f"❗ 자동 최적화 오류: {e}")
                 time.sleep(300)  # 오류 발생시 5분 대기
+                
+        print("🔚 자동 최적화 워커 종료")
     
     def _perform_optimization(self, update_callback):
         """실제 최적화 수행"""
         try:
-            print("자동 최적화 시작...")
+            print("🚀 자동 최적화 시작...")
             
-            # 거래 로그 데이터 로드
-            trades_data = self._load_recent_trades()
+            # 코인별 그리드 최적화 실행
+            results = coin_grid_manager.force_optimization_for_all_coins()
             
-            # 실적 분석
-            performance = auto_trading_system.analyze_performance(trades_data)
-            
-            if performance["status"] == "success":
-                # 파라미터 최적화
-                optimized_config = auto_trading_system.optimize_parameters(config, performance)
+            if results:
+                print("✅ 자동 최적화 완료")
                 
-                # 설정 업데이트
-                if optimized_config != config:
-                    config.update(optimized_config)
-                    save_config(config)
+                # 설정 업데이트 (최적화된 값들을 config에 반영)
+                for ticker, result in results.items():
+                    optimal_period, optimal_grid = result
+                    coin_key = ticker.replace('KRW-', '').lower()
                     
-                    # UI 업데이트 콜백 호출
-                    if update_callback:
-                        update_callback(config)
-                    
-                    # 최적화 결과 로그
-                    self._log_optimization_result(performance, optimized_config)
-                    
-                    # 카카오 알림
-                    if config.get('kakao_enabled', True):
-                        self._send_optimization_notification(performance, optimized_config)
-                else:
-                    print("최적화 결과 변경사항 없음")
+                    # 코인별 설정 업데이트
+                    if 'coin_specific_grids' not in config:
+                        config['coin_specific_grids'] = {}
+                    if coin_key not in config['coin_specific_grids']:
+                        config['coin_specific_grids'][coin_key] = {}
+                        
+                    config['coin_specific_grids'][coin_key]['period'] = optimal_period
+                    config['coin_specific_grids'][coin_key]['grid_count'] = optimal_grid
+                
+                # 마지막 최적화 시간 기록
+                config['last_optimization'] = datetime.now().isoformat()
+                save_config(config)
+                
+                # UI 업데이트 콜백 호출
+                if update_callback:
+                    update_callback(config)
+                
+                print(f"📊 최적화 결과: {len(results)}개 코인 업데이트 완료")
+            else:
+                print("❌ 최적화 결과 없음")
                     
             # 수익권 포지션 자동 매도 처리 (활성 거래가 있는 경우)
             if hasattr(self, 'active_tickers'):
@@ -973,7 +1051,7 @@ class AutoOptimizationScheduler:
                     except Exception as e:
                         print(f"자동 매도 처리 오류 ({ticker}): {e}")
             else:
-                print(f"최적화 건너뛰기: {performance['status']}")
+                print("❌ 최적화 결과 없음")
                 
                 # 실패해도 수익권 포지션 자동 매도는 수행
                 if hasattr(self, 'active_tickers'):
@@ -4598,9 +4676,10 @@ def start_dashboard():
     # 버튼 프레임 준비 (실제 버튼들은 함수 정의 후에 생성)
     main_button_frame = ttk.Frame(settings_frame)
     main_button_frame.grid(row=7, column=0, columnspan=2, sticky='ew', pady=(10, 5))
-    main_button_frame.grid_columnconfigure(0, weight=4)  # 거래시작 버튼 영역 (40% 비율)
-    main_button_frame.grid_columnconfigure(1, weight=3)  # 자동모드 버튼 영역 (30% 비율)
-    main_button_frame.grid_columnconfigure(2, weight=3)  # 고급설정 버튼 영역 (30% 비율)
+    main_button_frame.grid_columnconfigure(0, weight=3)  # 거래시작 버튼 영역 (30% 비율)
+    main_button_frame.grid_columnconfigure(1, weight=2)  # 자동모드 버튼 영역 (20% 비율)  
+    main_button_frame.grid_columnconfigure(2, weight=2)  # 최적화 버튼 영역 (20% 비율)
+    main_button_frame.grid_columnconfigure(3, weight=3)  # 고급설정 버튼 영역 (30% 비율)
     
     # 버튼 스타일 정의
     button_style = ttk.Style()
@@ -4787,6 +4866,11 @@ def start_dashboard():
             for ticker, stop_event in active_trades.items():
                 stop_event.set()
             active_trades.clear()  # active_trades 딕셔너리 클리어
+            
+            # 자동 최적화 스케줄러도 중지
+            auto_scheduler.stop_auto_optimization()
+            print("🛑 자동 최적화 스케줄러 중지")
+            
             toggle_button.config(text="거래 시작")
             return
 
@@ -4811,6 +4895,11 @@ def start_dashboard():
             config["target_profit_percent"] = target_entry.get()
             config["demo_mode"] = demo_var.get()
             config["auto_grid_count"] = auto_grid_var.get()
+            
+            # 자동 모드에서는 거래 시작 시 최적화 실행
+            if config.get('auto_trading_mode', False):
+                print("🚀 자동 모드 활성화 - 거래 시작 전 최적화 실행...")
+                coin_grid_manager.force_optimization_for_all_coins()
             config["auto_trading_mode"] = auto_trading_var.get()
             config["risk_mode"] = risk_mode_combo.get()
             
@@ -4824,6 +4913,11 @@ def start_dashboard():
             
             # 자동거래 상태 업데이트
             update_auto_status()
+            
+            # 자동 모드에서 거래 시작 시 자동 최적화 스케줄러도 시작
+            if config.get('auto_trading_mode', False):
+                print("🤖 자동 최적화 스케줄러 시작...")
+                auto_scheduler.start_auto_optimization(update_config)
 
             total_investment = float(amount_entry.get())
             grid_count = int(grid_entry.get())
@@ -4912,13 +5006,38 @@ def start_dashboard():
     toggle_button = ttk.Button(main_button_frame, text="거래 시작", command=toggle_trading)
     toggle_button.grid(row=0, column=0, padx=(0, 5), sticky='nsew')
     
-    # 자동모드 토글 버튼 (폭 30% 축소, 높이는 거래시작 버튼과 동일)
+    # 자동모드 토글 버튼
     auto_toggle_btn = ttk.Button(main_button_frame, text="🤖 자동모드", command=toggle_auto_mode, style='Small.TButton')
     auto_toggle_btn.grid(row=0, column=1, padx=(2, 2), sticky='nsew')
     
-    # 설정 버튼 (폭 30% 축소, 높이는 거래시작 버튼과 동일)
+    # 최적화 강제 실행 함수
+    def force_optimization():
+        """최적화를 강제로 실행"""
+        try:
+            results = coin_grid_manager.force_optimization_for_all_coins()
+            
+            # 차트 업데이트 트리거
+            for ticker in results.keys():
+                if ticker in chart_data:
+                    update_chart(ticker, int(config.get("period", 7)))
+            
+            # 결과 메시지 생성
+            result_msg = "자동 최적화 완료!\n\n"
+            for ticker, result in results.items():
+                coin_name = get_korean_coin_name(ticker)
+                result_msg += f"• {coin_name}: {result['period']}일/{result['grid_count']}그리드\n"
+            
+            messagebox.showinfo("최적화 완료", result_msg)
+        except Exception as e:
+            messagebox.showerror("최적화 오류", f"최적화 실행 중 오류가 발생했습니다:\n{e}")
+    
+    # 최적화 버튼
+    optimize_btn = ttk.Button(main_button_frame, text="🔍 최적화", command=force_optimization, style='Small.TButton')
+    optimize_btn.grid(row=0, column=2, padx=(2, 2), sticky='nsew')
+    
+    # 설정 버튼
     settings_btn = ttk.Button(main_button_frame, text="⚙️ 고급설정", command=lambda: open_settings_window(root, config, update_config, None), style='Small.TButton')
-    settings_btn.grid(row=0, column=2, padx=(2, 0), sticky='nsew')
+    settings_btn.grid(row=0, column=3, padx=(2, 0), sticky='nsew')
 
     def update_grid_count_on_period_change(event):
         if auto_grid_var.get():
