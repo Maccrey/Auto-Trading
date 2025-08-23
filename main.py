@@ -201,7 +201,7 @@ default_config = {
     "fee_rate": 0.0005,  # 거래 수수료율 (0.05%)
     "auto_trading_mode": False,  # 완전 자동 거래 모드
     "risk_mode": "보수적",  # 리스크 모드 (보수적, 안정적, 공격적, 극공격적)
-    "auto_update_interval": 60,  # 자동 업데이트 간격 (분)
+    "auto_update_interval": 60,  # 자동 최적화 간격 (분) - 1시간
     "performance_tracking": True,  # 실적 추적 활성화
     "auto_optimization": True,  # 자동 최적화 활성화
     # 코인별 그리드 설정
@@ -972,25 +972,26 @@ class AutoOptimizationScheduler:
     
     def _optimization_worker(self, update_callback):
         """자동 최적화 작업자"""
-        print(f"🤖 자동 최적화 워커 시작 - 간격: {config.get('auto_update_interval', 60)}분")
+        print(f"🤖 자동 최적화 워커 시작 - 1시간({config.get('auto_update_interval', 60)}분) 간격으로 실행")
         
         while not self.stop_optimization:
             try:
                 # 설정에서 간격 확인
                 interval_minutes = config.get('auto_update_interval', 60)
-                print(f"⏰ 다음 최적화까지 {interval_minutes}분 대기 시작...")
+                print(f"⏰ 다음 자동 최적화까지 {interval_minutes}분(1시간) 대기 시작...")
                 
                 # 간격만큼 대기 (10초씩 체크하여 중단 신호 확인)
-                for i in range(int(interval_minutes * 6)):  # 60분 = 360 * 10초
+                total_checks = int(interval_minutes * 6)  # 60분 = 360회 * 10초
+                for i in range(total_checks):
                     if self.stop_optimization:
                         print("🛑 최적화 워커 중단 신호 수신")
                         return
                     time.sleep(10)
                     
-                    # 매 5분마다 상태 출력 (30회 = 5분)
-                    if (i + 1) % 30 == 0:
-                        remaining_minutes = (interval_minutes * 6 - i - 1) / 6
-                        print(f"⏱️ 최적화까지 약 {remaining_minutes:.1f}분 남음")
+                    # 매 10분마다 상태 출력 (60회 = 10분)
+                    if (i + 1) % 60 == 0:
+                        remaining_minutes = (total_checks - i - 1) / 6
+                        print(f"⏱️ 자동 최적화까지 약 {remaining_minutes:.0f}분 남음")
                 
                 print(f"🔍 자동 최적화 실행 조건 체크...")
                 print(f"  - 자동 모드: {config.get('auto_trading_mode', False)}")
@@ -3903,6 +3904,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 })
                                 save_trading_state(ticker, demo_positions, True)
 
+                                # 매수 카운트 업데이트
+                                if ticker in trade_counts:
+                                    trade_counts[ticker]["buy"] += 1
+
                                 # 기술적 분석 정보 포함한 로그
                                 signal_info = f" (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)" if confidence > 50 else ""
                                 log_msg = f"하락추세 반전 매수: {buy_price:,.0f}원 ({quantity:.6f}개){signal_info}"
@@ -4020,7 +4025,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     
-                    # 매도 카운트는 initialize_trade_counts_from_logs()에서만 처리
+                    # 매도 카운트 업데이트
+                    if ticker in trade_counts:
+                        trade_counts[ticker]["sell"] += 1
+                        if net_profit > 0:
+                            trade_counts[ticker]["profitable_sell"] += 1
                     
                     update_gui('refresh_chart')
                     continue # 다음 포지션으로
@@ -4108,6 +4117,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 log_trade(ticker, "데모 매도", log_msg, grid_sell_reason, grid_sell_details)
                                 speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
                                 send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}")
+                                
+                                # 매도 카운트 업데이트
+                                if ticker in trade_counts:
+                                    trade_counts[ticker]["sell"] += 1
+                                    if net_profit > 0:
+                                        trade_counts[ticker]["profitable_sell"] += 1
                                 
                             else:
                                 # 기술적 분석이 매도를 방해하는 경우
@@ -4308,6 +4323,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             demo_positions.append(new_position)
                             save_trading_state(ticker, demo_positions, demo_mode)
                             
+                            # 매수 카운트 업데이트
+                            if ticker in trade_counts:
+                                trade_counts[ticker]["buy"] += 1
+                            
                             # 잔고 업데이트
                             demo_balance -= amount_per_grid
                             
@@ -4369,7 +4388,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             
                             print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
                             
-                            # 수익 거래 카운트는 initialize_trade_counts_from_logs()에서만 처리
+                            # 매도 카운트 업데이트
+                            if ticker in trade_counts:
+                                trade_counts[ticker]["sell"] += 1
+                                if net_profit > 0:
+                                    trade_counts[ticker]["profitable_sell"] += 1
                             
                             update_gui('refresh_chart')  # GUI 즉시 새로고침
                                 
@@ -4963,7 +4986,7 @@ def start_dashboard():
     auto_mode_label = ttk.Label(status_info_frame, text="🔴 자동 모드: 비활성", foreground="red", font=('Helvetica', 9, 'bold'))
     auto_mode_label.grid(row=0, column=0, sticky='w', padx=3)
     
-    update_interval_label = ttk.Label(status_info_frame, text=f"⏰ 업데이트: {config.get('auto_update_interval', 60)}분", foreground="purple", font=('Helvetica', 8))
+    update_interval_label = ttk.Label(status_info_frame, text=f"⏰ 자동최적화: {config.get('auto_update_interval', 60)}분(1시간)", foreground="purple", font=('Helvetica', 8))
     update_interval_label.grid(row=1, column=0, sticky='w', padx=3)
     
     risk_mode_status_label = ttk.Label(status_info_frame, text=f"⚡ 리스크: {config.get('risk_mode', '안정적')}", foreground="blue", font=('Helvetica', 9, 'bold'))
@@ -5010,8 +5033,8 @@ def start_dashboard():
     risk_mode_combo.set(config.get("risk_mode", "보수적"))
     risk_mode_combo.grid(row=1, column=1, sticky='ew', padx=3)
     
-    # 업데이트 간격 설정
-    ttk.Label(control_frame, text="업데이트 간격(분):").grid(row=2, column=0, sticky='w', padx=3, pady=1)
+    # 자동 최적화 간격 설정
+    ttk.Label(control_frame, text="자동최적화 간격(분):").grid(row=2, column=0, sticky='w', padx=3, pady=1)
     update_interval_entry = ttk.Entry(control_frame, width=15)
     update_interval_entry.insert(0, str(config.get("auto_update_interval", 60)))
     update_interval_entry.grid(row=2, column=1, sticky='w', padx=3)
@@ -5028,8 +5051,8 @@ def start_dashboard():
         risk_colors = {"보수적": "blue", "안정적": "green", "공격적": "orange", "극공격적": "red"}
         risk_mode_status_label.config(text=f"⚡ 리스크: {risk_mode}", foreground=risk_colors.get(risk_mode, "blue"))
         
-        # 업데이트 간격 표시
-        update_interval_label.config(text=f"⏰ 업데이트: {config.get('auto_update_interval', 60)}분")
+        # 자동 최적화 간격 표시
+        update_interval_label.config(text=f"⏰ 자동최적화: {config.get('auto_update_interval', 60)}분(1시간)")
         
     
     def update_action_status(ticker, status_type):
