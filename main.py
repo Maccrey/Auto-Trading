@@ -1857,6 +1857,53 @@ trade_counts = {
     "KRW-XRP": {"buy": 0, "sell": 0, "profitable_sell": 0}
 }
 
+def initialize_trade_counts_from_logs():
+    """거래 로그를 기반으로 실제 trade_counts 초기화"""
+    global trade_counts
+    
+    # trade_counts 초기화
+    for ticker in trade_counts:
+        trade_counts[ticker] = {"buy": 0, "sell": 0, "profitable_sell": 0}
+    
+    try:
+        if os.path.exists(log_file):
+            with open(log_file, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+            
+            # 각 코인별로 로그 분석
+            for ticker, ticker_logs in logs.items():
+                if ticker in trade_counts:
+                    for log_entry in ticker_logs:
+                        action = log_entry.get('action', '')
+                        # 실제 거래만 카운트 (데모 거래 제외)
+                        if '데모' not in action and '자동매도' not in action:
+                            if '매수' in action:
+                                trade_counts[ticker]["buy"] += 1
+                            elif '매도' in action:
+                                trade_counts[ticker]["sell"] += 1
+                                # 수익 거래 여부 확인 (details에서 수익 정보 확인)
+                                details = log_entry.get('details', {})
+                                if isinstance(details, dict):
+                                    profit_info = details.get('profit', '0')
+                                    if isinstance(profit_info, str) and '원' in profit_info:
+                                        try:
+                                            profit_value = int(profit_info.replace('원', '').replace(',', ''))
+                                            if profit_value > 0:
+                                                trade_counts[ticker]["profitable_sell"] += 1
+                                        except:
+                                            pass
+                                            
+        print(f"📊 거래 횟수 초기화 완료:")
+        for ticker, counts in trade_counts.items():
+            coin_name = get_korean_coin_name(ticker)
+            print(f"  {coin_name}: 매수 {counts['buy']}회, 매도 {counts['sell']}회, 수익거래 {counts['profitable_sell']}회")
+            
+    except Exception as e:
+        print(f"거래 횟수 초기화 오류: {e}")
+        # 오류 발생시 모든 값을 0으로 초기화
+        for ticker in trade_counts:
+            trade_counts[ticker] = {"buy": 0, "sell": 0, "profitable_sell": 0}
+
 # 실시간 로그 팝업 관련 전역 변수
 current_log_popup = None
 current_log_tree = None
@@ -1963,6 +2010,15 @@ def calculate_total_realized_profit():
         return total_profit
     except Exception as e:
         print(f"총 수익 계산 오류: {e}")
+        return 0
+
+def calculate_ticker_realized_profit(ticker):
+    """특정 코인의 실현수익 계산"""
+    try:
+        profits_data = load_profits_data()
+        return profits_data.get(ticker, 0)
+    except Exception as e:
+        print(f"{ticker} 실현수익 계산 오류: {e}")
         return 0
 
 def check_and_sell_profitable_positions(ticker, demo_mode=True):
@@ -3581,8 +3637,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 }
                                 log_trade(ticker, "데모 매수취소", log_msg, cancel_reason, cancel_details)
                             
-                            # 데모 모드에서도 매수 횟수 증가
-                            trade_counts[ticker]["buy"] += 1
+                            # 데모 모드에서는 매수 횟수를 증가시키지 않음 (실제 거래만 카운트)
                             
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
@@ -3664,10 +3719,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     
-                    # 데모 모드에서도 매도 횟수 증가
-                    trade_counts[ticker]["sell"] += 1
-                    if net_profit > 0:  # 수익이 난 거래만 카운트
-                        trade_counts[ticker]["profitable_sell"] += 1
+                    # 데모 모드에서는 매도 횟수를 증가시키지 않음 (실제 거래만 카운트)
                     
                     update_gui('refresh_chart')
                     continue # 다음 포지션으로
@@ -3770,10 +3822,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     }
                                     log_trade(ticker, "데모 매도취소", log_msg, sell_cancel_reason, sell_cancel_details)
                             
-                            # 데모 모드에서도 매도 횟수 증가
-                            trade_counts[ticker]["sell"] += 1
-                            if net_profit > 0:  # 수익이 난 거래만 카운트
-                                trade_counts[ticker]["profitable_sell"] += 1
+                            # 데모 모드에서는 매도 횟수를 증가시키지 않음 (실제 거래만 카운트)
                             
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
@@ -3809,7 +3858,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             held_value = sum(pos['quantity'] * price for pos in demo_positions)
             
             # 총자산 = 현금 잔고 + 코인 가치 (실현수익은 별도로 추가해야 함)
-            current_realized_profit = calculate_total_realized_profit()
+            ticker_realized_profit = calculate_ticker_realized_profit(ticker)
             total_value = demo_balance + held_value
             
             # 코인 보유량이 0일 때 평가수익도 0으로 처리
@@ -3863,11 +3912,14 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             invested_amount = sum(pos['quantity'] * pos['actual_buy_price'] for pos in demo_positions)
             unrealized_profit = held_value - invested_amount  # 평가수익 = 현재 코인가치 - 투자금액
             
+            # 해당 코인의 실현수익 계산
+            ticker_realized_profit = calculate_ticker_realized_profit(ticker)
+            
             # 총자산 = 초기 투자금 + 실현수익 + 평가수익
-            total_value = start_balance + current_realized_profit + unrealized_profit
+            total_value = start_balance + ticker_realized_profit + unrealized_profit
             
             # 전체 수익 = 실현수익 + 평가수익  
-            profit = current_realized_profit + unrealized_profit
+            profit = ticker_realized_profit + unrealized_profit
             
             # 전체 수익률 계산
             profit_percent = (profit / start_balance) * 100 if start_balance > 0 else 0
@@ -3876,10 +3928,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             if coin_quantity == 0:
                 unrealized_profit = 0
                 held_value = 0
-                profit = current_realized_profit  # 실현수익만
-                total_value = start_balance + current_realized_profit  # 초기금 + 실현수익
+                profit = ticker_realized_profit  # 실현수익만
+                total_value = start_balance + ticker_realized_profit  # 초기금 + 실현수익
                 
-            realized_profit_percent = (current_realized_profit / total_investment) * 100 if total_investment > 0 else 0
+            realized_profit_percent = (ticker_realized_profit / total_investment) * 100 if total_investment > 0 else 0
             
             # 평가수익과 평가수익률 계산
             unrealized_profit_percent = (unrealized_profit / total_investment) * 100 if total_investment > 0 else 0
@@ -3904,7 +3956,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     
                     last_alert_time[ticker] = current_time
             
-            update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, current_realized_profit, realized_profit_percent, unrealized_profit, unrealized_profit_percent)
+            update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, ticker_realized_profit, realized_profit_percent, unrealized_profit, unrealized_profit_percent)
             update_gui('market_status', market_status, market_details)
 
             # 고급 그리드 차트 상태 업데이트
@@ -4886,6 +4938,9 @@ def start_dashboard():
 
         # 이전 거래 상태 로드 확인
         should_resume = load_previous_trading_state()
+        
+        # 거래 횟수를 거래 로그 기반으로 정확하게 초기화
+        initialize_trade_counts_from_logs()
 
         try:
             # 현재 UI 설정값을 config에 저장
@@ -5511,6 +5566,38 @@ def start_dashboard():
         # 가격 라인 그리기
         ax.plot(df.index, df['close'], 'b-', linewidth=1, label='가격')
         
+        # 실시간 현재 가격 표시
+        try:
+            current_price = pyupbit.get_current_price(ticker)
+            if current_price and len(df) > 0:
+                # 현재 가격 수평선 표시
+                ax.axhline(y=current_price, color='orange', linestyle='-', alpha=0.8, linewidth=2, label=f'현재가 ({current_price:,.0f})')
+                
+                # 차트 우측에 실시간 정보 표시
+                realtime_info = f'현재가: {current_price:,.0f}원\n시간: {datetime.now().strftime("%H:%M:%S")}'
+                
+                # 그리드와 현재 가격의 관계 정보 추가
+                if ticker in chart_data and len(chart_data[ticker]) >= 3:
+                    high_price, low_price, grid_levels = chart_data[ticker][:3]
+                    if grid_levels:
+                        # 현재 가격이 어느 그리드 영역에 있는지 표시
+                        grid_position = "범위외"
+                        if low_price <= current_price <= high_price:
+                            for i, level in enumerate(grid_levels):
+                                if current_price <= level:
+                                    grid_position = f"그리드 {i+1}/{len(grid_levels)}"
+                                    break
+                        
+                        price_ratio = ((current_price - low_price) / (high_price - low_price)) * 100 if high_price != low_price else 50
+                        realtime_info += f'\n위치: {grid_position} ({price_ratio:.1f}%)'
+                
+                ax.text(0.98, 0.02, realtime_info, 
+                       transform=ax.transAxes, 
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='orange', alpha=0.8),
+                       fontsize=9, horizontalalignment='right', verticalalignment='bottom', fontweight='bold')
+        except Exception as e:
+            print(f"실시간 가격 표시 오류: {e}")
+        
         # 그리드 라인 그리기
         if ticker in chart_data:
             chart_info = chart_data[ticker]
@@ -5523,8 +5610,40 @@ def start_dashboard():
                 grid_count_info = len(grid_levels) - 1 if grid_levels else 0
                 allocated_amount = 0
             
-            for level in grid_levels:
-                ax.axhline(y=level, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
+            # 그리드 라인 및 현재 가격과의 관계 표시
+            try:
+                current_price = pyupbit.get_current_price(ticker)
+                for i, level in enumerate(grid_levels):
+                    # 현재 가격과 그리드 라인의 관계에 따라 색상 변경
+                    if current_price:
+                        if level > current_price:
+                            # 현재가보다 높은 그리드 (매도 영역) - 빨간색
+                            color = 'lightcoral'
+                            alpha = 0.6
+                        elif level < current_price:
+                            # 현재가보다 낮은 그리드 (매수 영역) - 초록색
+                            color = 'lightgreen'
+                            alpha = 0.6
+                        else:
+                            # 현재가와 비슷한 그리드 - 노란색
+                            color = 'yellow'
+                            alpha = 0.8
+                    else:
+                        color = 'gray'
+                        alpha = 0.5
+                    
+                    ax.axhline(y=level, color=color, linestyle='--', alpha=alpha, linewidth=0.8)
+                    
+                    # 중요한 그리드 라인에 가격 표시
+                    if i % 3 == 0:  # 3번째마다 가격 표시
+                        ax.text(0.01, level/ax.get_ylim()[1]*0.95, f'{level:,.0f}', 
+                               transform=ax.transData, fontsize=7, alpha=0.8,
+                               verticalalignment='center', horizontalalignment='left')
+                        
+            except Exception as e:
+                # 실시간 가격 조회 실패시 기본 그리드 표시
+                for level in grid_levels:
+                    ax.axhline(y=level, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
             
             ax.axhline(y=high_price, color='green', linestyle='-', alpha=0.8, linewidth=1, label=f'상한선 ({high_price:,.0f})')
             ax.axhline(y=low_price, color='red', linestyle='-', alpha=0.8, linewidth=1, label=f'하한선 ({low_price:,.0f})')
@@ -5786,9 +5905,69 @@ def start_dashboard():
         for ticker in tickers:
             update_chart(ticker, current_period)
     
-    chart_refresh_btn = ttk.Button(mid_frame, text="차트 새로고침", command=refresh_charts)
-    chart_refresh_btn.pack(pady=5)
+    # 차트 상태 표시 및 컨트롤
+    chart_status_frame = ttk.Frame(mid_frame)
+    chart_status_frame.pack(pady=5)
+    
+    chart_refresh_btn = ttk.Button(chart_status_frame, text="차트 새로고침", command=refresh_charts)
+    chart_refresh_btn.pack(side='left', padx=(0, 5))
+    
+    # 실시간 업데이트 상태 표시
+    global chart_status_label
+    chart_status_label = ttk.Label(chart_status_frame, text="📊 실시간 업데이트: 준비중", 
+                                  font=('Helvetica', 8), foreground='blue')
+    chart_status_label.pack(side='left', padx=(5, 0))
 
+    # 실시간 차트 자동 새로고침 스케줄러
+    def auto_refresh_charts():
+        """실시간 차트 자동 새로고침 (10초마다)"""
+        try:
+            current_time = datetime.now().strftime("%H:%M:%S")
+            
+            # 거래가 활성화되어 있을 때만 차트 자동 업데이트
+            if active_trades:
+                current_period = period_combo.get()
+                updated_count = 0
+                for ticker in active_trades.keys():
+                    if ticker in charts:
+                        # 실시간 차트 업데이트 (그리드와 현재 가격 포함)
+                        update_chart(ticker, current_period)
+                        updated_count += 1
+                
+                # 상태 업데이트
+                chart_status_label.config(text=f"🔄 실시간 업데이트: 활성 ({updated_count}개 코인) - {current_time}", 
+                                        foreground='green')
+                        
+            # 비활성화 상태에서도 주기적으로 현재 가격 업데이트 (30초마다)
+            elif hasattr(auto_refresh_charts, 'update_count'):
+                auto_refresh_charts.update_count += 1
+                if auto_refresh_charts.update_count >= 3:  # 30초마다 (10초 * 3)
+                    auto_refresh_charts.update_count = 0
+                    current_period = period_combo.get()
+                    selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
+                    updated_count = 0
+                    for ticker in selected_tickers:
+                        if ticker in charts:
+                            update_chart(ticker, current_period)
+                            updated_count += 1
+                    
+                    chart_status_label.config(text=f"⏸️ 주기적 업데이트: 대기중 ({updated_count}개 코인) - {current_time}", 
+                                            foreground='orange')
+                else:
+                    chart_status_label.config(text=f"⏸️ 주기적 업데이트: 대기중 - {current_time}", 
+                                            foreground='orange')
+            else:
+                auto_refresh_charts.update_count = 0
+                chart_status_label.config(text=f"📊 실시간 업데이트: 준비중 - {current_time}", 
+                                        foreground='blue')
+                        
+        except Exception as e:
+            print(f"차트 자동 새로고침 오류: {e}")
+            chart_status_label.config(text=f"❌ 업데이트 오류: {current_time}", foreground='red')
+        finally:
+            # 10초 후 다시 새로고침
+            root.after(10000, auto_refresh_charts)
+    
     # 자동 백업 스케줄러 시작
     def periodic_backup_check():
         """1분마다 자동 백업 검사"""
@@ -5806,6 +5985,9 @@ def start_dashboard():
     
     # 자동 백업 시작
     root.after(5000, periodic_backup_check)  # 5초 후 시작
+    
+    # 실시간 차트 자동 새로고침 시작
+    root.after(15000, auto_refresh_charts)  # 15초 후 시작 (초기 로드 이후)
     
     # 초기 차트 로드
     root.after(1000, refresh_charts)
