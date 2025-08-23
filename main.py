@@ -892,6 +892,383 @@ def perform_manual_optimization():
     # 별도 스레드에서 실행 (GUI 블록 방지)
     threading.Thread(target=optimization_task, daemon=True).start()
 
+# 고도화된 기술적 분석 시스템
+class AdvancedTechnicalAnalyzer:
+    """보조지표를 활용한 고도화된 기술적 분석 시스템"""
+    
+    def __init__(self):
+        self.indicators_cache = {}
+        self.signal_history = {}
+    
+    def calculate_rsi(self, prices, period=14):
+        """RSI 계산"""
+        if len(prices) < period + 1:
+            return None
+            
+        deltas = np.diff(prices)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        
+        avg_gains = pd.Series(gains).rolling(window=period).mean()
+        avg_losses = pd.Series(losses).rolling(window=period).mean()
+        
+        rs = avg_gains / avg_losses
+        rsi = 100 - (100 / (1 + rs))
+        return rsi.iloc[-1] if len(rsi) > 0 else None
+    
+    def calculate_macd(self, prices, fast=12, slow=26, signal=9):
+        """MACD 계산"""
+        if len(prices) < slow + signal:
+            return None, None, None
+            
+        prices_series = pd.Series(prices)
+        ema_fast = prices_series.ewm(span=fast).mean()
+        ema_slow = prices_series.ewm(span=slow).mean()
+        
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=signal).mean()
+        histogram = macd_line - signal_line
+        
+        return macd_line.iloc[-1], signal_line.iloc[-1], histogram.iloc[-1]
+    
+    def calculate_bollinger_bands(self, prices, period=20, std_dev=2):
+        """볼린저 밴드 계산"""
+        if len(prices) < period:
+            return None, None, None
+            
+        prices_series = pd.Series(prices)
+        sma = prices_series.rolling(window=period).mean()
+        std = prices_series.rolling(window=period).std()
+        
+        upper_band = sma + (std * std_dev)
+        lower_band = sma - (std * std_dev)
+        
+        return upper_band.iloc[-1], sma.iloc[-1], lower_band.iloc[-1]
+    
+    def calculate_stochastic(self, highs, lows, closes, k_period=14, d_period=3):
+        """스토캐스틱 계산"""
+        if len(closes) < k_period:
+            return None, None
+            
+        lowest_lows = pd.Series(lows).rolling(window=k_period).min()
+        highest_highs = pd.Series(highs).rolling(window=k_period).max()
+        
+        k_percent = 100 * ((pd.Series(closes) - lowest_lows) / (highest_highs - lowest_lows))
+        d_percent = k_percent.rolling(window=d_period).mean()
+        
+        return k_percent.iloc[-1], d_percent.iloc[-1]
+    
+    def calculate_williams_r(self, highs, lows, closes, period=14):
+        """윌리엄스 %R 계산"""
+        if len(closes) < period:
+            return None
+            
+        highest_highs = pd.Series(highs).rolling(window=period).max()
+        lowest_lows = pd.Series(lows).rolling(window=period).min()
+        
+        williams_r = -100 * ((highest_highs - pd.Series(closes)) / (highest_highs - lowest_lows))
+        return williams_r.iloc[-1]
+    
+    def calculate_momentum(self, prices, period=10):
+        """모멘텀 계산"""
+        if len(prices) < period + 1:
+            return None
+        return (prices[-1] / prices[-period-1] - 1) * 100
+    
+    def get_comprehensive_signals(self, ticker, current_price, market_data=None):
+        """종합적인 매수/매도 신호 분석"""
+        try:
+            # 시장 데이터 가져오기
+            if market_data is None:
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=100)
+                if df is None or len(df) < 50:
+                    return {'signal': 'hold', 'strength': 0, 'confidence': 0}
+            else:
+                df = market_data
+            
+            closes = df['close'].values
+            highs = df['high'].values
+            lows = df['low'].values
+            volumes = df['volume'].values
+            
+            signals = {}
+            
+            # 1. RSI 분석
+            rsi = self.calculate_rsi(closes)
+            if rsi is not None:
+                if rsi < 30:
+                    signals['rsi'] = {'signal': 'strong_buy', 'value': rsi, 'weight': 0.25}
+                elif rsi < 45:
+                    signals['rsi'] = {'signal': 'buy', 'value': rsi, 'weight': 0.15}
+                elif rsi > 70:
+                    signals['rsi'] = {'signal': 'strong_sell', 'value': rsi, 'weight': 0.25}
+                elif rsi > 55:
+                    signals['rsi'] = {'signal': 'sell', 'value': rsi, 'weight': 0.15}
+                else:
+                    signals['rsi'] = {'signal': 'hold', 'value': rsi, 'weight': 0.05}
+            
+            # 2. MACD 분석
+            macd, signal_line, histogram = self.calculate_macd(closes)
+            if macd is not None and signal_line is not None:
+                if histogram > 0 and macd > signal_line:
+                    signals['macd'] = {'signal': 'buy', 'weight': 0.2}
+                elif histogram < 0 and macd < signal_line:
+                    signals['macd'] = {'signal': 'sell', 'weight': 0.2}
+                else:
+                    signals['macd'] = {'signal': 'hold', 'weight': 0.1}
+            
+            # 3. 볼린저 밴드 분석
+            bb_upper, bb_middle, bb_lower = self.calculate_bollinger_bands(closes)
+            if bb_upper is not None and bb_lower is not None:
+                bb_position = (current_price - bb_lower) / (bb_upper - bb_lower)
+                if bb_position < 0.1:
+                    signals['bollinger'] = {'signal': 'strong_buy', 'position': bb_position, 'weight': 0.2}
+                elif bb_position < 0.3:
+                    signals['bollinger'] = {'signal': 'buy', 'position': bb_position, 'weight': 0.15}
+                elif bb_position > 0.9:
+                    signals['bollinger'] = {'signal': 'strong_sell', 'position': bb_position, 'weight': 0.2}
+                elif bb_position > 0.7:
+                    signals['bollinger'] = {'signal': 'sell', 'position': bb_position, 'weight': 0.15}
+                else:
+                    signals['bollinger'] = {'signal': 'hold', 'position': bb_position, 'weight': 0.05}
+            
+            # 4. 스토캐스틱 분석
+            k_percent, d_percent = self.calculate_stochastic(highs, lows, closes)
+            if k_percent is not None and d_percent is not None:
+                if k_percent < 20 and d_percent < 20:
+                    signals['stochastic'] = {'signal': 'strong_buy', 'k': k_percent, 'd': d_percent, 'weight': 0.15}
+                elif k_percent < 40:
+                    signals['stochastic'] = {'signal': 'buy', 'k': k_percent, 'd': d_percent, 'weight': 0.1}
+                elif k_percent > 80 and d_percent > 80:
+                    signals['stochastic'] = {'signal': 'strong_sell', 'k': k_percent, 'd': d_percent, 'weight': 0.15}
+                elif k_percent > 60:
+                    signals['stochastic'] = {'signal': 'sell', 'k': k_percent, 'd': d_percent, 'weight': 0.1}
+                else:
+                    signals['stochastic'] = {'signal': 'hold', 'k': k_percent, 'd': d_percent, 'weight': 0.05}
+            
+            # 5. 거래량 분석
+            recent_volume_avg = np.mean(volumes[-10:])
+            current_volume = volumes[-1]
+            volume_ratio = current_volume / recent_volume_avg if recent_volume_avg > 0 else 1
+            
+            if volume_ratio > 2.0:  # 거래량 급증
+                signals['volume'] = {'signal': 'volume_surge', 'ratio': volume_ratio, 'weight': 0.1}
+            elif volume_ratio > 1.5:
+                signals['volume'] = {'signal': 'volume_high', 'ratio': volume_ratio, 'weight': 0.05}
+            else:
+                signals['volume'] = {'signal': 'volume_normal', 'ratio': volume_ratio, 'weight': 0.02}
+            
+            # 6. 종합 신호 계산
+            buy_score = 0
+            sell_score = 0
+            total_weight = 0
+            
+            for indicator, data in signals.items():
+                weight = data['weight']
+                signal = data['signal']
+                
+                if 'strong_buy' in signal:
+                    buy_score += weight * 2
+                elif 'buy' in signal:
+                    buy_score += weight * 1
+                elif 'strong_sell' in signal:
+                    sell_score += weight * 2
+                elif 'sell' in signal:
+                    sell_score += weight * 1
+                
+                total_weight += weight
+            
+            # 신호 강도 및 신뢰도 계산
+            net_score = buy_score - sell_score
+            strength = abs(net_score) / total_weight if total_weight > 0 else 0
+            confidence = min(100, strength * 100)
+            
+            # 최종 신호 결정
+            if net_score > 0.3:
+                final_signal = 'strong_buy' if net_score > 0.5 else 'buy'
+            elif net_score < -0.3:
+                final_signal = 'strong_sell' if net_score < -0.5 else 'sell'
+            else:
+                final_signal = 'hold'
+            
+            return {
+                'signal': final_signal,
+                'strength': strength,
+                'confidence': confidence,
+                'buy_score': buy_score,
+                'sell_score': sell_score,
+                'indicators': signals,
+                'net_score': net_score
+            }
+            
+        except Exception as e:
+            print(f"기술적 분석 오류 ({ticker}): {e}")
+            return {'signal': 'hold', 'strength': 0, 'confidence': 0}
+    
+    def should_override_grid_signal(self, ticker, grid_signal, current_price, market_data=None):
+        """그리드 신호를 기술적 분석으로 Override할지 결정"""
+        technical_analysis = self.get_comprehensive_signals(ticker, current_price, market_data)
+        
+        # 높은 신뢰도의 반대 신호가 있을 때만 Override
+        if technical_analysis['confidence'] < 70:
+            return False, technical_analysis
+        
+        # 그리드가 매수 신호인데 기술적 분석이 강한 매도 신호
+        if grid_signal == 'buy' and technical_analysis['signal'] in ['strong_sell', 'sell']:
+            return True, technical_analysis
+        
+        # 그리드가 매도 신호인데 기술적 분석이 강한 매수 신호  
+        if grid_signal == 'sell' and technical_analysis['signal'] in ['strong_buy', 'buy']:
+            return True, technical_analysis
+        
+        return False, technical_analysis
+
+# 글로벌 기술적 분석기 인스턴스
+technical_analyzer = AdvancedTechnicalAnalyzer()
+
+# 고도화된 리스크 관리 시스템
+class AdvancedRiskManager:
+    """고도화된 리스크 관리 및 손절 시스템"""
+    
+    def __init__(self):
+        self.position_risks = {}
+        self.market_conditions = {}
+        self.emergency_stop = False
+    
+    def calculate_position_risk(self, ticker, position, current_price):
+        """개별 포지션 리스크 계산"""
+        buy_price = position.get('actual_buy_price', position.get('buy_price', 0))
+        if buy_price <= 0:
+            return {'risk_level': 'unknown', 'loss_percent': 0}
+        
+        # 현재 손실률 계산 (음수: 손실, 양수: 수익)
+        loss_percent = ((current_price - buy_price) / buy_price) * 100
+        
+        # 리스크 레벨 결정
+        if loss_percent <= -15:  # 15% 이상 하락
+            risk_level = 'extreme'
+        elif loss_percent <= -10:  # 10% 이상 하락
+            risk_level = 'high'
+        elif loss_percent <= -5:   # 5% 이상 하락
+            risk_level = 'medium'
+        elif loss_percent <= -2:   # 2% 이상 하락
+            risk_level = 'low'
+        else:
+            risk_level = 'safe'
+        
+        return {
+            'risk_level': risk_level,
+            'loss_percent': loss_percent,
+            'should_stop_loss': loss_percent < config.get('stop_loss_threshold', -5.0)
+        }
+    
+    def should_emergency_stop(self, ticker, current_price, positions):
+        """긴급 정지 조건 확인"""
+        if not positions:
+            return False, "포지션 없음"
+        
+        total_loss = 0
+        high_risk_positions = 0
+        
+        for position in positions:
+            risk_info = self.calculate_position_risk(ticker, position, current_price)
+            if risk_info['loss_percent'] < -10:  # 10% 이상 손실
+                total_loss += abs(risk_info['loss_percent'])
+                high_risk_positions += 1
+        
+        # 긴급 정지 조건:
+        # 1. 평균 손실이 12% 이상
+        # 2. 고위험 포지션이 전체의 50% 이상
+        avg_loss = total_loss / len(positions) if positions else 0
+        high_risk_ratio = high_risk_positions / len(positions) if positions else 0
+        
+        emergency_conditions = [
+            (avg_loss > 12, f"평균 손실 {avg_loss:.1f}% 초과"),
+            (high_risk_ratio > 0.5, f"고위험 포지션 {high_risk_ratio*100:.0f}% 초과")
+        ]
+        
+        for condition, reason in emergency_conditions:
+            if condition:
+                return True, reason
+        
+        return False, "정상"
+    
+    def calculate_optimal_position_size(self, ticker, base_amount, technical_analysis):
+        """기술적 분석 기반 최적 포지션 크기 계산"""
+        confidence = technical_analysis.get('confidence', 50)
+        signal_strength = technical_analysis.get('strength', 0.5)
+        
+        # 신뢰도와 신호 강도에 따른 포지션 크기 조정
+        if confidence > 80 and signal_strength > 0.7:
+            multiplier = 1.3  # 강한 신호일 때 30% 증가
+        elif confidence > 60 and signal_strength > 0.5:
+            multiplier = 1.1  # 보통 신호일 때 10% 증가
+        elif confidence < 40 or signal_strength < 0.3:
+            multiplier = 0.7  # 약한 신호일 때 30% 감소
+        else:
+            multiplier = 1.0  # 기본 크기
+        
+        # 리스크 모드에 따른 추가 조정
+        risk_mode = config.get('risk_mode', '안정적')
+        risk_multipliers = {
+            '보수적': 0.8,
+            '안정적': 1.0,
+            '공격적': 1.2,
+            '극공격적': 1.4
+        }
+        
+        risk_multiplier = risk_multipliers.get(risk_mode, 1.0)
+        final_amount = base_amount * multiplier * risk_multiplier
+        
+        return min(final_amount, base_amount * 1.5)  # 최대 150%까지만 허용
+    
+    def should_cut_loss(self, ticker, position, current_price, technical_analysis):
+        """손절 여부 결정"""
+        risk_info = self.calculate_position_risk(ticker, position, current_price)
+        
+        # 기본 손절 조건
+        if risk_info['should_stop_loss']:
+            return True, f"손절선 도달 (손실: {risk_info['loss_percent']:.1f}%)"
+        
+        # 기술적 분석 기반 손절
+        signal = technical_analysis.get('signal', 'hold')
+        confidence = technical_analysis.get('confidence', 0)
+        
+        # 강한 매도 신호 + 높은 신뢰도 + 손실 상황
+        if (signal == 'strong_sell' and 
+            confidence > 75 and 
+            risk_info['loss_percent'] < -3):  # 3% 이상 손실
+            return True, f"기술적 손절 ({signal}, 신뢰도: {confidence:.0f}%)"
+        
+        return False, "유지"
+    
+    def get_market_sentiment(self, ticker, current_price, recent_prices):
+        """시장 심리 분석"""
+        if len(recent_prices) < 10:
+            return "insufficient_data"
+        
+        # 최근 10분봉의 변동성 계산
+        volatility = np.std(recent_prices[-10:]) / np.mean(recent_prices[-10:])
+        price_momentum = (recent_prices[-1] - recent_prices[-5]) / recent_prices[-5]
+        
+        if volatility > 0.05:  # 5% 이상 변동성
+            if price_momentum > 0.02:
+                return "bullish_volatile"  # 상승 변동성
+            elif price_momentum < -0.02:
+                return "bearish_volatile"  # 하락 변동성
+            else:
+                return "neutral_volatile"  # 중립 변동성
+        else:
+            if price_momentum > 0.01:
+                return "bullish_stable"    # 안정적 상승
+            elif price_momentum < -0.01:
+                return "bearish_stable"    # 안정적 하락
+            else:
+                return "sideways"          # 횡보
+
+# 글로벌 리스크 관리자 인스턴스
+risk_manager = AdvancedRiskManager()
+
 def save_trading_state(ticker, positions, demo_mode):
     """현재 포지션 상태를 파일에 저장"""
     with state_lock:
@@ -2492,6 +2869,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     # 새로운 매수 로직을 위한 상태 변수
     buy_pending = False
     lowest_grid_to_buy = -1
+    recent_prices = []  # 가격 히스토리 저장
 
     while not stop_event.is_set():
         # 9시 정각 그리드 자동 갱신 및 투자금 재분배
@@ -2562,7 +2940,63 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
                 time.sleep(5)  # API 오류 시 5초 대기 후 재시도
                 continue
+            
+            # 가격 히스토리 업데이트 (최대 20개 유지)
+            recent_prices.append(price)
+            if len(recent_prices) > 20:
+                recent_prices.pop(0)
+            
+            # 긴급 정지 조건 확인
+            if demo_mode and demo_positions:
+                emergency_stop, emergency_reason = risk_manager.should_emergency_stop(ticker, price, demo_positions)
+                if emergency_stop:
+                    log_and_update('긴급정지', f"긴급 거래 중단: {emergency_reason}")
+                    speak_async(f"긴급 상황! {get_korean_coin_name(ticker)} 거래를 중단합니다.")
+                    update_gui('status', "상태: 긴급 정지", "Red.TLabel", False, False)
+                    break
+            
+            # 기술적 분석 및 개별 포지션 리스크 관리
+            if demo_mode and demo_positions:
+                current_technical_analysis = technical_analyzer.get_comprehensive_signals(ticker, price)
+                positions_to_remove = []
                 
+                for i, position in enumerate(demo_positions):
+                    # 손절 조건 확인
+                    should_cut, cut_reason = risk_manager.should_cut_loss(
+                        ticker, position, price, current_technical_analysis
+                    )
+                    
+                    if should_cut:
+                        # 강제 손절 매도
+                        sell_amount = position['quantity'] * price
+                        net_sell_amount = sell_amount * (1 - fee_rate)
+                        
+                        demo_balance += net_sell_amount
+                        positions_to_remove.append(position)
+                        
+                        buy_cost = position['quantity'] * position.get('actual_buy_price', position['buy_price'])
+                        net_loss = net_sell_amount - buy_cost
+                        total_realized_profit += net_loss
+                        
+                        # profits.json에 손실 데이터 저장
+                        profits_data = load_profits_data()
+                        current_profit = profits_data.get(ticker, 0)
+                        profits_data[ticker] = current_profit + net_loss
+                        save_profits_data(profits_data)
+                        
+                        log_msg = f"손절 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 손실: {net_loss:,.0f}원 ({cut_reason})"
+                        log_and_update("데모 손절", log_msg)
+                        speak_async(f"손절! {get_korean_coin_name(ticker)} {price:,.0f}원에 매도")
+                        send_kakao_message(f"[손절 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 손실: {net_loss:,.0f}원")
+                
+                # 손절된 포지션 제거
+                for position in positions_to_remove:
+                    demo_positions.remove(position)
+                
+                if positions_to_remove:
+                    save_trading_state(ticker, demo_positions, True)
+                    update_gui('refresh_chart')
+                    
         except KeyError as e: # 가격 데이터 형식 오류 처리
             log_and_update('오류', f'가격 데이터 조회 오류 (KeyError): {e}')
             update_gui('action_status', 'error')
@@ -2688,38 +3122,74 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     update_gui('action_status', 'looking_buy')
                 
                 else:
-                    # 가격이 반등하여 최저 그리드를 '확실히' 돌파했는지 체크 (매수 실행)
+                    # 가격이 반등하여 최저 그리드를 '확실히' 돌파했는지 체크 (매수 실행 + 기술적 분석)
                     confirmation_buffer = 0.001 # 0.1% 버퍼
                     buy_confirmation_price = grid_levels[lowest_grid_to_buy] * (1 + confirmation_buffer)
-                    if price >= buy_confirmation_price:
-                        buy_price = grid_levels[lowest_grid_to_buy]
-                        already_bought = any(pos['buy_price'] == buy_price for pos in demo_positions)
+                    
+                    # 기본 가격 조건 확인
+                    price_condition_met = price >= buy_confirmation_price
+                    
+                    if price_condition_met:
+                        # 기술적 분석으로 매수 신호 검증
+                        should_override, technical_analysis = technical_analyzer.should_override_grid_signal(ticker, 'buy', price)
+                        technical_signal = technical_analysis.get('signal', 'hold')
+                        confidence = technical_analysis.get('confidence', 0)
+                        
+                        # 매수 실행 조건:
+                        # 1. 기술적 분석이 매수를 방해하지 않음 (override가 아님)
+                        # 2. 또는 기술적 분석이 강한 매수 신호
+                        execute_buy = not should_override or technical_signal in ['strong_buy', 'buy']
+                        
+                        if execute_buy:
+                            buy_price = grid_levels[lowest_grid_to_buy]
+                            already_bought = any(pos['buy_price'] == buy_price for pos in demo_positions)
 
-                        if not already_bought and demo_balance >= amount_per_grid:
-                            buy_multiplier = 1.5 if panic_mode else 1.0
-                            actual_buy_amount = min(amount_per_grid * buy_multiplier, demo_balance)
-                            
-                            quantity = (actual_buy_amount * (1 - fee_rate)) / buy_price
-                            demo_balance -= actual_buy_amount
-                            total_invested += actual_buy_amount
-                            
-                            target_sell_price = grid_levels[lowest_grid_to_buy + 1]
-                            
-                            demo_positions.append({
-                                'buy_price': buy_price,
-                                'quantity': quantity,
-                                'target_sell_price': target_sell_price,
-                                'actual_buy_price': buy_price,
-                                'highest_price': buy_price,
-                                'sell_held': False,
-                                'highest_grid_reached': -1
-                            })
-                            save_trading_state(ticker, demo_positions, True)
+                            if not already_bought and demo_balance >= amount_per_grid:
+                                # 리스크 관리 기반 최적 포지션 크기 계산
+                                optimal_amount = risk_manager.calculate_optimal_position_size(
+                                    ticker, amount_per_grid, technical_analysis
+                                )
+                                
+                                # 급락장에서는 추가 조정
+                                buy_multiplier = 1.3 if panic_mode else 1.0
+                                actual_buy_amount = min(optimal_amount * buy_multiplier, demo_balance)
+                                
+                                # 시장 심리 고려한 추가 조정
+                                market_sentiment = risk_manager.get_market_sentiment(ticker, price, recent_prices)
+                                if market_sentiment in ['bearish_volatile', 'bearish_stable']:
+                                    actual_buy_amount *= 0.9  # 하락장에서는 10% 감소
+                                
+                                quantity = (actual_buy_amount * (1 - fee_rate)) / buy_price
+                                demo_balance -= actual_buy_amount
+                                total_invested += actual_buy_amount
+                                
+                                target_sell_price = grid_levels[lowest_grid_to_buy + 1]
+                                
+                                demo_positions.append({
+                                    'buy_price': buy_price,
+                                    'quantity': quantity,
+                                    'target_sell_price': target_sell_price,
+                                    'actual_buy_price': buy_price,
+                                    'highest_price': buy_price,
+                                    'sell_held': False,
+                                    'highest_grid_reached': -1,
+                                    'technical_score': technical_analysis.get('net_score', 0),
+                                    'confidence': confidence
+                                })
+                                save_trading_state(ticker, demo_positions, True)
 
-                            log_msg = f"하락추세 반등 매수: {buy_price:,.0f}원 ({quantity:.6f}개)"
-                            log_and_update("데모 매수", log_msg)
-                            speak_async(f"데모 모드, {get_korean_coin_name(ticker)} {buy_price:,.0f}원에 최종 매수되었습니다.")
-                            send_kakao_message(f"[데모 최종매수] {get_korean_coin_name(ticker)} {buy_price:,.0f}원 ({quantity:.6f}개)")
+                                # 기술적 분석 정보 포함한 로그
+                                signal_info = f" (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)" if confidence > 50 else ""
+                                log_msg = f"하락추세 반전 매수: {buy_price:,.0f}원 ({quantity:.6f}개){signal_info}"
+                                log_and_update("데모 매수", log_msg)
+                                speak_async(f"데모 모드, {get_korean_coin_name(ticker)} {buy_price:,.0f}원에 최종 매수되었습니다.")
+                                send_kakao_message(f"[데모 최종매수] {get_korean_coin_name(ticker)} {buy_price:,.0f}원 ({quantity:.6f}개){signal_info}")
+                                
+                        else:
+                            # 기술적 분석이 매수를 방해하는 경우
+                            if should_override:
+                                log_msg = f"매수 신호 무시 (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)"
+                                log_and_update("데모 매수취소", log_msg)
                             
                             # 데모 모드에서도 매수 횟수 증가
                             trade_counts[ticker]["buy"] += 1
@@ -2810,33 +3280,54 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         update_gui('action_status', 'looking_sell')
 
                     else:
-                        # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행)
+                        # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행 + 기술적 분석)
                         confirmation_buffer = 0.001 # 0.1% 버퍼
                         sell_confirmation_price = grid_levels[current_highest_grid] * (1 - confirmation_buffer)
-                        if price <= sell_confirmation_price:
-                            sell_price = grid_levels[current_highest_grid] # 하락한 그리드 가격으로 매도
-                            sell_amount = position['quantity'] * sell_price
-                            net_sell_amount = sell_amount * (1 - fee_rate)
+                        price_condition_met = price <= sell_confirmation_price
+                        
+                        if price_condition_met:
+                            # 기술적 분석으로 매도 신호 검증
+                            should_override, technical_analysis = technical_analyzer.should_override_grid_signal(ticker, 'sell', price)
+                            technical_signal = technical_analysis.get('signal', 'hold')
+                            confidence = technical_analysis.get('confidence', 0)
                             
-                            demo_balance += net_sell_amount
-                            demo_positions.remove(position)
-                            save_trading_state(ticker, demo_positions, True)
+                            # 매도 실행 조건:
+                            # 1. 기술적 분석이 매도를 방해하지 않음 (override가 아님)
+                            # 2. 또는 기술적 분석이 강한 매도 신호
+                            execute_sell = not should_override or technical_signal in ['strong_sell', 'sell']
                             
-                            buy_cost = position['quantity'] * position['actual_buy_price']
-                            net_profit = net_sell_amount - buy_cost
-                            total_realized_profit += net_profit
-                            
-                            # profits.json에 수익 데이터 저장 (수익/손실 모두 기록)
-                            profits_data = load_profits_data()
-                            current_profit = profits_data.get(ticker, 0)
-                            profits_data[ticker] = current_profit + net_profit
-                            save_profits_data(profits_data)
-                            print(f"프로스 저장: {ticker} 수익 {net_profit:,.0f}원 추가")  # 디버그
+                            if execute_sell:
+                                sell_price = grid_levels[current_highest_grid] # 하락한 그리드 가격으로 매도
+                                sell_amount = position['quantity'] * sell_price
+                                net_sell_amount = sell_amount * (1 - fee_rate)
+                                
+                                demo_balance += net_sell_amount
+                                demo_positions.remove(position)
+                                save_trading_state(ticker, demo_positions, True)
+                                
+                                buy_cost = position['quantity'] * position['actual_buy_price']
+                                net_profit = net_sell_amount - buy_cost
+                                total_realized_profit += net_profit
+                                
+                                # profits.json에 수익 데이터 저장 (수익/손실 모두 기록)
+                                profits_data = load_profits_data()
+                                current_profit = profits_data.get(ticker, 0)
+                                profits_data[ticker] = current_profit + net_profit
+                                save_profits_data(profits_data)
+                                print(f"프로스 저장: {ticker} 수익 {net_profit:,.0f}원 추가")  # 디버그
 
-                            log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
-                            log_and_update("데모 매도", log_msg)
-                            speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
-                            send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원")
+                                # 기술적 분석 정보 포함한 로그
+                                signal_info = f" (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)" if confidence > 50 else ""
+                                log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}"
+                                log_and_update("데모 매도", log_msg)
+                                speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
+                                send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}")
+                                
+                            else:
+                                # 기술적 분석이 매도를 방해하는 경우
+                                if should_override:
+                                    log_msg = f"매도 신호 무시 (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)"
+                                    log_and_update("데모 매도취소", log_msg)
                             
                             # 데모 모드에서도 매도 횟수 증가
                             trade_counts[ticker]["sell"] += 1
