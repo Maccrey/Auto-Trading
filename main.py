@@ -4988,23 +4988,22 @@ def start_dashboard():
 
     # 거래 모드 선택 (라디오 버튼)
     trade_mode_frame = ttk.LabelFrame(settings_frame, text="📊 거래 모드 선택")
-    trade_mode_frame.grid(row=8, column=0, columnspan=2, sticky='ew', padx=3, pady=3)
+    trade_mode_frame.grid(row=8, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
+    
+    # 컬럼 가중치 설정으로 공간 확보
+    trade_mode_frame.grid_columnconfigure(0, weight=1)
+    trade_mode_frame.grid_columnconfigure(1, weight=1)
     
     demo_var = tk.IntVar(value=config.get("demo_mode", 1))
     
     demo_radio = ttk.Radiobutton(trade_mode_frame, text="🧪 데모 모드 (가상 거래)", 
                                 variable=demo_var, value=1, style='Small.TRadiobutton')
-    demo_radio.grid(row=0, column=0, sticky='w', padx=5, pady=2)
+    demo_radio.grid(row=0, column=0, sticky='w', padx=8, pady=5)
     
     real_radio = ttk.Radiobutton(trade_mode_frame, text="💰 실거래 모드 (실제 거래)", 
                                 variable=demo_var, value=0, style='Small.TRadiobutton')
-    real_radio.grid(row=0, column=1, sticky='w', padx=5, pady=2)
+    real_radio.grid(row=0, column=1, sticky='w', padx=8, pady=5)
     
-    # 거래 모드 설명 라벨
-    mode_info_label = ttk.Label(trade_mode_frame, 
-                               text="데모: 안전한 테스트 | 실거래: API 키 필요",
-                               font=('Helvetica', 8), foreground='gray')
-    mode_info_label.grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=(0, 5))
     
     # 초기 자동거래 상태 설정
     update_auto_status()
@@ -6196,10 +6195,6 @@ def start_dashboard():
                 print(f"GUI 업데이트 오류: {e}")
         root.after(100, process_gui_queue)
 
-    # 설명 라벨 추가
-    info_text = "그리드 투자: 설정 기간의 최고가/최저가 범위를 그리드로 분할하여 자동 매수/매도 (v3.0 - 차트/로그 개선)"
-    info_label = ttk.Label(settings_frame, text=info_text, font=('Helvetica', 8), foreground='gray')
-    info_label.grid(row=8, column=0, columnspan=2, sticky='ew', padx=3, pady=2)
     
     # 차트 업데이트 버튼
     def refresh_charts():
