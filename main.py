@@ -4808,8 +4808,6 @@ def start_dashboard():
     risk_mode_status_label = ttk.Label(status_info_frame, text=f"⚡ 리스크: {config.get('risk_mode', '안정적')}", foreground="blue", font=('Helvetica', 9, 'bold'))
     risk_mode_status_label.grid(row=0, column=1, sticky='w', padx=3)
     
-    last_optimization_label = ttk.Label(status_info_frame, text="🔄 최근 최적화: -", foreground="gray", font=('Helvetica', 8))
-    last_optimization_label.grid(row=1, column=1, sticky='w', padx=3)
 
     ttk.Label(settings_frame, text="총 투자 금액 (KRW):").grid(row=1, column=0, sticky='w', padx=3, pady=1)
     amount_entry = ttk.Entry(settings_frame)
@@ -4872,15 +4870,6 @@ def start_dashboard():
         # 업데이트 간격 표시
         update_interval_label.config(text=f"⏰ 업데이트: {config.get('auto_update_interval', 60)}분")
         
-        last_opt = config.get('last_optimization')
-        if last_opt:
-            try:
-                opt_time = datetime.fromisoformat(last_opt).strftime('%H:%M')
-                last_optimization_label.config(text=f"🔄 최근 최적화: {opt_time}")
-            except:
-                last_optimization_label.config(text="🔄 최근 최적화: -")
-        else:
-            last_optimization_label.config(text="🔄 최근 최적화: -")
     
     def update_action_status(ticker, status_type):
         """코인별 행동 상태 업데이트
