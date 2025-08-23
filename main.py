@@ -75,11 +75,22 @@ def stop_tts_worker():
         tts_worker_thread.join(timeout=2)
 
 
+# 데이터 폴더 및 파일 관리
+# 데이터 폴더 생성
+data_dir = Path("data")
+data_dir.mkdir(exist_ok=True)
+
+# 백업 폴더도 생성
+backup_dir = data_dir / "backup"
+backup_dir.mkdir(exist_ok=True)
+(backup_dir / "corrupted").mkdir(exist_ok=True)
+(backup_dir / "daily").mkdir(exist_ok=True)
+
 # 설정 파일 관리
-config_file = "config.json"
-profit_file = "profits.json"
-log_file = "trade_logs.json"
-state_file = "trading_state.json"
+config_file = data_dir / "config.json"
+profit_file = data_dir / "profits.json"
+log_file = data_dir / "trade_logs.json"
+state_file = data_dir / "trading_state.json"
 state_lock = threading.Lock() # 상태 파일 접근을 위한 락
 
 default_config = {
@@ -1300,24 +1311,24 @@ def update_investment_with_profits(original_investment):
 def backup_logs_before_clear():
     """데이터 초기화 전 로그 백업"""
     try:
-        # backup 폴더 생성
-        backup_dir = Path("backup")
-        backup_dir.mkdir(exist_ok=True)
+        # data/backup 폴더 사용
+        backup_folder = data_dir / "backup"
+        backup_folder.mkdir(parents=True, exist_ok=True)
         
         # 현재 시간으로 백업 파일명 생성
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         # 각 데이터 파일 백업
         files_to_backup = [
-            ('trade_logs.json', f'trade_logs_{timestamp}.json'),
-            ('trading_state.json', f'trading_state_{timestamp}.json'),
-            ('profits.json', f'profits_{timestamp}.json')
+            (log_file, f'trade_logs_{timestamp}.json'),
+            (state_file, f'trading_state_{timestamp}.json'),
+            (profit_file, f'profits_{timestamp}.json')
         ]
         
         backed_up_files = []
         for source, backup_name in files_to_backup:
             if os.path.exists(source):
-                backup_path = backup_dir / backup_name
+                backup_path = backup_folder / backup_name
                 shutil.copy2(source, backup_path)
                 backed_up_files.append(backup_name)
                 print(f"백업 완료: {source} → {backup_path}")
@@ -1329,7 +1340,7 @@ def backup_logs_before_clear():
             'note': '데이터 초기화 전 자동 백업'
         }
         
-        with open(backup_dir / f'backup_info_{timestamp}.json', 'w', encoding='utf-8') as f:
+        with open(backup_folder / f'backup_info_{timestamp}.json', 'w', encoding='utf-8') as f:
             json.dump(backup_info, f, indent=2, ensure_ascii=False)
         
         return len(backed_up_files)
@@ -1344,25 +1355,25 @@ def auto_backup_logs():
         now = datetime.now()
         # 매일 새벽 2시에 백업 (시장 종료 후)
         if now.hour == 2 and now.minute == 0:
-            backup_dir = Path("backup/daily")
-            backup_dir.mkdir(parents=True, exist_ok=True)
+            daily_backup_dir = data_dir / "backup" / "daily"
+            daily_backup_dir.mkdir(parents=True, exist_ok=True)
             
             date_str = now.strftime('%Y%m%d')
             
             # trade_logs.json이 존재하고 비어있지 않으면 백업
-            if os.path.exists('trade_logs.json'):
+            if os.path.exists(log_file):
                 try:
-                    with open('trade_logs.json', 'r', encoding='utf-8') as f:
+                    with open(log_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     
                     # 로그가 있으면 백업
                     if data and any(logs for logs in data.values() if logs):
-                        backup_path = backup_dir / f'trade_logs_{date_str}.json'
-                        shutil.copy2('trade_logs.json', backup_path)
+                        backup_path = daily_backup_dir / f'trade_logs_{date_str}.json'
+                        shutil.copy2(log_file, backup_path)
                         print(f"일일 자동 백업 완료: {backup_path}")
                         
                         # 오래된 백업 파일 정리 (30일 이상)
-                        cleanup_old_backups(backup_dir, days=30)
+                        cleanup_old_backups(daily_backup_dir, days=30)
                         
                 except Exception as e:
                     print(f"일일 백업 오류: {e}")
@@ -1386,14 +1397,14 @@ def cleanup_old_backups(backup_dir, days=30):
 def restore_logs_from_backup():
     """백업에서 로그 복구"""
     try:
-        backup_dir = Path("backup")
-        if not backup_dir.exists():
-            messagebox.showwarning("백업 없음", "backup 폴더가 없습니다.")
+        backup_folder = data_dir / "backup"
+        if not backup_folder.exists():
+            messagebox.showwarning("백업 없음", "data/backup 폴더가 없습니다.")
             return False
         
         # 백업 파일 목록 가져오기
-        backup_files = list(backup_dir.glob('trade_logs_*.json'))
-        daily_backup_files = list((backup_dir / 'daily').glob('trade_logs_*.json')) if (backup_dir / 'daily').exists() else []
+        backup_files = list(backup_folder.glob('trade_logs_*.json'))
+        daily_backup_files = list((backup_folder / 'daily').glob('trade_logs_*.json')) if (backup_folder / 'daily').exists() else []
         
         all_backup_files = backup_files + daily_backup_files
         
@@ -1411,7 +1422,7 @@ def restore_logs_from_backup():
         )
         
         if confirm:
-            shutil.copy2(latest_backup, 'trade_logs.json')
+            shutil.copy2(latest_backup, log_file)
             messagebox.showinfo("복구 완료", f"로그가 성공적으로 복구되었습니다.\n\n복구된 파일: {latest_backup.name}")
             return True
             
@@ -1520,47 +1531,75 @@ def safe_json_load(file_path, default_value=None):
         return default_value if default_value is not None else {}
 
 def safe_json_save(file_path, data):
-    """안전한 JSON 파일 저장 (임시 파일 사용)"""
-    try:
-        # 임시 파일에 먼저 저장
-        temp_file = f"{file_path}.tmp"
-        
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        
-        # 임시 파일이 정상적으로 저장되면 원본 파일로 이동
-        if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-            # 기존 파일 백업 (덧어쓰기 전)
-            if os.path.exists(file_path):
-                backup_file = f"{file_path}.backup"
-                shutil.copy2(file_path, backup_file)
-            
-            # 임시 파일을 원본 파일로 이동
-            shutil.move(temp_file, file_path)
-            return True
-        else:
-            print(f"경고: 임시 파일 생성 실패: {temp_file}")
-            return False
-            
-    except Exception as e:
-        print(f"JSON 저장 오류 ({file_path}): {e}")
-        # 임시 파일 정리
+    """안전한 JSON 파일 저장 (임시 파일 사용, 파일 잠금)"""
+    import time
+    import random
+    
+    # 파일 잠금을 위한 최대 재시도 횟수
+    max_retries = 5
+    
+    for attempt in range(max_retries):
         try:
-            if os.path.exists(f"{file_path}.tmp"):
-                os.remove(f"{file_path}.tmp")
-        except:
-            pass
-        return False
+            # 고유한 임시 파일명 생성 (동시 접근 방지)
+            timestamp = int(time.time() * 1000)
+            random_suffix = random.randint(1000, 9999)
+            temp_file = f"{file_path}.tmp.{timestamp}.{random_suffix}"
+            
+            # 임시 파일에 먼저 저장
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            
+            # 임시 파일이 정상적으로 저장되었는지 확인
+            if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                # 기존 파일 백업 (덧어쓰기 전)
+                if os.path.exists(file_path):
+                    backup_file = f"{file_path}.backup"
+                    try:
+                        shutil.copy2(file_path, backup_file)
+                    except Exception as backup_err:
+                        print(f"백업 파일 생성 실패: {backup_err}")
+                
+                # 임시 파일을 원본 파일로 이동
+                shutil.move(temp_file, file_path)
+                return True
+            else:
+                print(f"경고: 임시 파일 생성 실패: {temp_file}")
+                # 실패한 임시 파일 정리
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except:
+                    pass
+                
+        except (OSError, IOError) as e:
+            print(f"JSON 저장 시도 {attempt + 1}/{max_retries} 실패 ({file_path}): {e}")
+            
+            # 실패한 임시 파일 정리
+            try:
+                if 'temp_file' in locals() and os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except:
+                pass
+            
+            if attempt < max_retries - 1:
+                # 짧은 대기 후 재시도
+                time.sleep(0.1 + (attempt * 0.05))
+            
+        except Exception as e:
+            print(f"JSON 저장 오류 ({file_path}): {e}")
+            break
+    
+    return False
 
 def backup_corrupted_file(file_path):
     """손상된 파일 백업"""
     try:
-        backup_dir = Path("backup/corrupted")
-        backup_dir.mkdir(parents=True, exist_ok=True)
+        corrupted_backup_dir = data_dir / "backup" / "corrupted"
+        corrupted_backup_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = Path(file_path).name
-        backup_path = backup_dir / f"{filename}.corrupted_{timestamp}"
+        backup_path = corrupted_backup_dir / f"{filename}.corrupted_{timestamp}"
         
         shutil.copy2(file_path, backup_path)
         print(f"손상된 파일 백업: {file_path} → {backup_path}")
@@ -1610,24 +1649,29 @@ def detect_panic_selling(current_price, previous_prices, threshold_percent=-5.0)
 # 향상된 가격 범위 계산 함수
 def calculate_enhanced_price_range(ticker, period, use_custom_range=False, custom_high=None, custom_low=None):
     """코인별 최적화된 가격 범위 계산"""
+    actual_period = period
+    
     # 코인별 설정 기간 사용
     if config.get('auto_trading_mode', False):
         coin_period = coin_grid_manager.get_price_range_days(ticker)
         if coin_period != period:
-            period = coin_period
-            print(f"{get_korean_coin_name(ticker)} 코인별 가격범위 기간: {period}일")
+            actual_period = f"{coin_period}일"
+            print(f"{get_korean_coin_name(ticker)} 코인별 가격범위 기간: {actual_period}")
+    
     """향상된 가격 범위 계산 (사용자 지정 범위 및 자동 그리드 개수 고려)"""
     if use_custom_range and custom_high and custom_low:
         try:
             high_price = float(custom_high)
             low_price = float(custom_low)
             if high_price > low_price:
-                return high_price, low_price
+                return high_price, low_price, actual_period
         except (ValueError, TypeError):
             pass
     
-    # 기존 범위 계산 로직 사용
-    return calculate_price_range(ticker, period)
+    # 기존 범위 계산 로직 사용 (실제 기간은 숫자값 필요)
+    period_for_calc = coin_grid_manager.get_price_range_days(ticker) if config.get('auto_trading_mode', False) else period
+    high_price, low_price = calculate_price_range(ticker, period_for_calc)
+    return high_price, low_price, actual_period
 
 def calculate_dynamic_grid(base_low, base_high, current_price, panic_mode=False):
     """동적 그리드 계산 (급락장 대응)"""
@@ -1727,7 +1771,10 @@ def evaluate_status(profit_percent, is_trading=False, panic_mode=False):
 def calculate_price_range(ticker, period):
     """선택한 기간에 따라 상한가/하한가를 계산"""
     try:
-        if period == "1시간":
+        # 숫자 형태의 일 수 처리
+        if isinstance(period, (int, float)):
+            df = pyupbit.get_ohlcv(ticker, interval="day", count=int(period))
+        elif period == "1시간":
             df = pyupbit.get_ohlcv(ticker, interval="minute60", count=1)
         elif period == "4시간":
             df = pyupbit.get_ohlcv(ticker, interval="minute60", count=4)
@@ -2097,7 +2144,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     custom_high = config.get('custom_high_price', '')
     custom_low = config.get('custom_low_price', '')
     
-    high_price, low_price = calculate_enhanced_price_range(
+    high_price, low_price, actual_period = calculate_enhanced_price_range(
         ticker, period, use_custom_range, custom_high, custom_low
     )
     
@@ -2159,7 +2206,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         )
         log_and_update('자동계산', f"최적 그리드 개수: {grid_count}개")
 
-    log_and_update('시작', f"{period} 범위: {low_price:,.0f}~{high_price:,.0f}")
+    log_and_update('시작', f"{actual_period} 범위: {low_price:,.0f}~{high_price:,.0f}")
+    
+    # GUI에 실제 사용된 기간 정보 전송
+    update_gui('period_info', actual_period, high_price, low_price, grid_count)
     
     # 고급 그리드 상태 초기화
     advanced_grid_state = AdvancedGridState()
@@ -3263,7 +3313,7 @@ def start_dashboard():
     start_tts_worker()
 
     root = tk.Tk()
-    root.title("그리드 투자 자동매매 대시보드 v2.7")
+    root.title("그리드 투자 자동매매 대시보드 v3.0")
     root.geometry("1400x900")
 
     def on_closing():
@@ -3978,7 +4028,7 @@ def start_dashboard():
         # 로그 백업 생성
         try:
             backup_logs_before_clear()
-            messagebox.showinfo("백업 완료", "기존 로그가 'backup' 폴더에 백업되었습니다.")
+            messagebox.showinfo("백업 완료", "기존 로그가 'data/backup' 폴더에 백업되었습니다.")
         except Exception as e:
             print(f"백업 오류: {e}")
         
@@ -4021,13 +4071,18 @@ def start_dashboard():
                     os.remove(state_file_path)
                     
             # 거래 로그 파일 초기화
-            if os.path.exists("trade_logs.json"):
-                with open("trade_logs.json", 'w', encoding='utf-8') as f:
-                    json.dump([], f, ensure_ascii=False, indent=2)
+            if os.path.exists(log_file):
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    json.dump({}, f, ensure_ascii=False, indent=2)
                     
             # 수익 데이터 파일 초기화
-            if os.path.exists("profits.json"):
-                with open("profits.json", 'w', encoding='utf-8') as f:
+            if os.path.exists(profit_file):
+                with open(profit_file, 'w', encoding='utf-8') as f:
+                    json.dump({}, f, ensure_ascii=False, indent=2)
+                    
+            # 거래 상태 파일 초기화
+            if os.path.exists(state_file):
+                with open(state_file, 'w', encoding='utf-8') as f:
                     json.dump({}, f, ensure_ascii=False, indent=2)
                     
         except Exception as e:
@@ -4045,13 +4100,13 @@ def start_dashboard():
         total_profit_label.config(text="총 실현수익: 0원", style="Black.TLabel")
         total_profit_rate_label.config(text="총 실현수익률: (0.00%)", style="Black.TLabel")
 
-        # Clear JSON files
-        for filename in ["profits.json", "trade_logs.json", "trading_state.json"]:
+        # Clear JSON files (redundant with above, keeping for compatibility)
+        for file_path in [profit_file, log_file, state_file]:
             try:
-                with open(filename, 'w') as f:
-                    json.dump({}, f)  # Write an empty JSON object
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump({}, f, ensure_ascii=False, indent=2)  # Write an empty JSON object
             except Exception as e:
-                print(f"Error clearing {filename}: {e}")
+                print(f"Error clearing {file_path}: {e}")
 
         print("All data cleared.")
 
@@ -4311,7 +4366,15 @@ def start_dashboard():
         
         ax = charts[ticker]
         ax.clear()
-        ax.set_title(f'{ticker} 가격 차트 ({period})', fontsize=10)
+        
+        # 실제 사용된 기간 정보가 있으면 그것을 사용, 없으면 매개변수 사용
+        display_period = period
+        if ticker in chart_data and len(chart_data[ticker]) >= 6:
+            actual_period = chart_data[ticker][5]
+            if actual_period:  # 비어있지 않으면
+                display_period = actual_period
+        
+        ax.set_title(f'{ticker} 가격 차트 ({display_period})', fontsize=10)
         ax.set_xlabel('시간', fontsize=8)
         ax.set_ylabel('가격 (KRW)', fontsize=8)
         ax.tick_params(axis='both', which='major', labelsize=7)
@@ -4322,8 +4385,10 @@ def start_dashboard():
         # 그리드 라인 그리기
         if ticker in chart_data:
             chart_info = chart_data[ticker]
-            if len(chart_info) >= 5:
-                high_price, low_price, grid_levels, grid_count_info, allocated_amount = chart_info
+            if len(chart_info) >= 6:
+                high_price, low_price, grid_levels, grid_count_info, allocated_amount, actual_period = chart_info
+            elif len(chart_info) >= 5:
+                high_price, low_price, grid_levels, grid_count_info, allocated_amount = chart_info[:5]
             else:
                 high_price, low_price, grid_levels = chart_info[:3]
                 grid_count_info = len(grid_levels) - 1 if grid_levels else 0
@@ -4505,24 +4570,42 @@ def start_dashboard():
 
                     total_profit_label.config(text=f'총 실현수익: {overall_profit:,.0f}원', style=get_profit_color_style(overall_profit))
                     total_profit_rate_label.config(text=f'총 실현수익률: ({overall_profit_percent:+.2f}%)', style=get_profit_color_style(overall_profit))
+                elif key == 'period_info':
+                    # 실제 사용된 기간 정보 저장
+                    actual_period, high_price, low_price, grid_count = args
+                    if ticker not in chart_data:
+                        chart_data[ticker] = (0, 0, [], 0, 0, '')
+                    
+                    # 기존 데이터 유지 하면서 실제 기간 업데이트
+                    if len(chart_data[ticker]) >= 6:
+                        old_data = chart_data[ticker]
+                        chart_data[ticker] = (high_price, low_price, old_data[2], grid_count, old_data[4], actual_period)
+                    else:
+                        chart_data[ticker] = (high_price, low_price, [], grid_count, 0, actual_period)
                 elif key == 'chart_data':
                     if len(args) >= 5:
                         high_price, low_price, grid_levels, grid_count_info, allocated_amount = args
-                        chart_data[ticker] = (high_price, low_price, grid_levels, grid_count_info, allocated_amount)
+                        # 기존 실제 기간 정보 유지
+                        actual_period = chart_data.get(ticker, ('', '', [], 0, 0, ''))[5] if ticker in chart_data and len(chart_data[ticker]) >= 6 else period_combo.get()
+                        chart_data[ticker] = (high_price, low_price, grid_levels, grid_count_info, allocated_amount, actual_period)
                     else:
                         high_price, low_price, grid_levels = args
-                        chart_data[ticker] = (high_price, low_price, grid_levels, 0, 0)
-                    current_period = period_combo.get()
-                    update_chart(ticker, current_period)
+                        actual_period = chart_data.get(ticker, ('', '', [], 0, 0, ''))[5] if ticker in chart_data and len(chart_data[ticker]) >= 6 else period_combo.get()
+                        chart_data[ticker] = (high_price, low_price, grid_levels, 0, 0, actual_period)
+                    
+                    # 실제 사용된 기간으로 차트 업데이트
+                    actual_period_to_use = chart_data[ticker][5] if len(chart_data[ticker]) >= 6 else period_combo.get()
+                    update_chart(ticker, actual_period_to_use)
                 elif key == 'refresh_chart':
-                    current_period = period_combo.get()
-                    update_chart(ticker, current_period)
+                    # 실제 사용된 기간이 있으면 그것을 사용, 없으면 기본값
+                    actual_period_to_use = chart_data.get(ticker, ('', '', [], 0, 0, period_combo.get()))[5] if ticker in chart_data and len(chart_data.get(ticker, [])) >= 6 else period_combo.get()
+                    update_chart(ticker, actual_period_to_use)
             except Exception as e:
                 print(f"GUI 업데이트 오류: {e}")
         root.after(100, process_gui_queue)
 
     # 설명 라벨 추가
-    info_text = "그리드 투자: 설정 기간의 최고가/최저가 범위를 그리드로 분할하여 자동 매수/매도 (v2.6 - 차트/로그 개선)"
+    info_text = "그리드 투자: 설정 기간의 최고가/최저가 범위를 그리드로 분할하여 자동 매수/매도 (v3.0 - 차트/로그 개선)"
     info_label = ttk.Label(settings_frame, text=info_text, font=('Helvetica', 8), foreground='gray')
     info_label.grid(row=8, column=0, columnspan=2, sticky='ew', padx=3, pady=2)
     
