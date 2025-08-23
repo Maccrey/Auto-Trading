@@ -833,6 +833,65 @@ class AutoOptimizationScheduler:
 # 글로벌 자동 최적화 스케줄러 인스턴스
 auto_scheduler = AutoOptimizationScheduler()
 
+def perform_manual_optimization():
+    """수동 최적화 실행"""
+    def optimization_task():
+        try:
+            messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다. 잠시 기다려주세요...")
+            
+            # 거래 로그 데이터 로드
+            trades_data = auto_scheduler._load_recent_trades()
+            if len(trades_data) < 10:
+                messagebox.showwarning("최적화 실패", "최적화를 위한 충분한 거래 데이터가 없습니다. (최소 10개 필요)")
+                return
+            
+            # 성능 분석
+            performance = auto_trading_system.analyze_performance(trades_data)
+            
+            if performance["status"] == "success":
+                # 파라미터 최적화
+                old_config = dict(config)  # 이전 설정 복사
+                optimized_config = auto_trading_system.optimize_parameters(config, performance)
+                
+                # 설정 업데이트
+                config.update(optimized_config)
+                save_config(config)
+                
+                # 최적화 시간 업데이트
+                config['last_optimization'] = datetime.now().isoformat()
+                save_config(config)
+                
+                # GUI 업데이트는 메인 스레드에서 처리됨
+                
+                # 최적화 결과 로그
+                auto_scheduler._log_optimization_result(performance, optimized_config)
+                
+                # 결과 메시지
+                win_rate = performance.get('win_rate', 0) * 100
+                total_profit = performance.get('total_profit', 0)
+                new_risk_mode = config.get('risk_mode', '알 수 없음')
+                
+                result_msg = f"✅ 수동 최적화 완료!\n\n"
+                result_msg += f"🎯 리스크 모드: {new_risk_mode}\n"
+                result_msg += f"📊 승률: {win_rate:.1f}%\n"
+                result_msg += f"💰 수익: {total_profit:,.0f}원\n"
+                result_msg += f"🕐 최적화 시간: {datetime.now().strftime('%H:%M')}"
+                
+                messagebox.showinfo("최적화 완료", result_msg)
+                
+                # 카카오 알림
+                if config.get('kakao_enabled', True):
+                    auto_scheduler._send_optimization_notification(performance, optimized_config)
+                    
+            else:
+                messagebox.showwarning("최적화 실패", f"최적화를 수행할 수 없습니다:\n{performance.get('message', '알 수 없는 오류')}")
+                
+        except Exception as e:
+            messagebox.showerror("최적화 오류", f"수동 최적화 중 오류가 발생했습니다:\n{e}")
+    
+    # 별도 스레드에서 실행 (GUI 블록 방지)
+    threading.Thread(target=optimization_task, daemon=True).start()
+
 def save_trading_state(ticker, positions, demo_mode):
     """현재 포지션 상태를 파일에 저장"""
     with state_lock:
@@ -4009,10 +4068,12 @@ def start_dashboard():
                command=export_data_to_excel).pack(side='left', padx=(5, 5))
     ttk.Button(button_row1, text="🗑️ 데이터 초기화", 
                command=lambda: clear_all_data(None, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits)).pack(side='left', padx=(5, 5))
-    ttk.Button(button_row1, text="📊 거래 로그", 
-               command=show_trading_log_popup).pack(side='left', padx=(5, 2))
     ttk.Button(button_row1, text="🔄 로그 복구", 
-               command=restore_logs_from_backup).pack(side='left', padx=(2, 0))
+               command=restore_logs_from_backup).pack(side='left', padx=(5, 2))
+    ttk.Button(button_row1, text="📊 거래 로그", 
+               command=show_trading_log_popup).pack(side='left', padx=(2, 2))
+    ttk.Button(button_row1, text="⚡ 수동 최적화", 
+               command=perform_manual_optimization).pack(side='left', padx=(2, 0))
 
     def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits):
         # 안전 장치: 2단계 확인
