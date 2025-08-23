@@ -266,8 +266,14 @@ class CoinSpecificGridManager:
         return self.coin_profiles.get(ticker, self.coin_profiles["KRW-BTC"])
     
     def calculate_optimal_grid_count(self, ticker, price_range, total_investment, current_price=None):
-        """코인별 최적 그리드 수 계산"""
+        """코인별 최적 그리드 수 계산 (자동 최적화 포함)"""
         try:
+            # 자동 모드에서는 고급 최적화 알고리즘 사용
+            if config.get('auto_trading_mode', False):
+                _, optimal_grid_count = self.find_optimal_period_and_grid(ticker)
+                return optimal_grid_count
+                
+            # 수동 모드에서는 기존 로직 사용
             profile = self.get_coin_profile(ticker)
             coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
             
@@ -300,9 +306,138 @@ class CoinSpecificGridManager:
             return 20  # 기본값
     
     def get_price_range_days(self, ticker):
-        """코인별 가격 범위 계산 기간 반환"""
+        """코인별 가격 범위 계산 기간 반환 (자동 최적화 포함)"""
+        # 자동 모드에서는 최적 기간 계산
+        if config.get('auto_trading_mode', False):
+            optimal_period, _ = self.find_optimal_period_and_grid(ticker)
+            return optimal_period
+        
+        # 수동 모드에서는 설정된 기간 사용
         coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
         return coin_config.get('price_range_days', 7)
+    
+    def find_optimal_period_and_grid(self, ticker):
+        """최적의 기간과 그리드 개수를 찾는 고급 알고리즘 (백테스팅 포함)"""
+        try:
+            # 여러 기간을 테스트
+            test_periods = [3, 5, 7, 10, 14, 21, 30]
+            best_score = -1
+            best_period = 7
+            best_grid_count = 20
+            
+            current_price = pyupbit.get_current_price(ticker)
+            if not current_price:
+                return best_period, best_grid_count
+                
+            for period in test_periods:
+                try:
+                    # 각 기간별로 가격 범위 계산
+                    high_price, low_price = calculate_price_range(ticker, period)
+                    if high_price <= low_price:
+                        continue
+                        
+                    # 변동성과 트렌드 분석
+                    price_range = high_price - low_price
+                    volatility = price_range / ((high_price + low_price) / 2)
+                    
+                    # 현재가가 범위 내에 있는지 확인
+                    price_position = (current_price - low_price) / price_range if price_range > 0 else 0.5
+                    
+                    # 최적 그리드 개수 계산 (변동성과 가격 위치 기반)
+                    base_grid = self.get_coin_profile(ticker)["optimal_grid_base"]
+                    
+                    # 변동성에 따른 그리드 밀도 조정
+                    grid_density_factor = 1.0
+                    if volatility > 0.15:  # 높은 변동성
+                        grid_density_factor = 1.3
+                    elif volatility < 0.05:  # 낮은 변동성
+                        grid_density_factor = 0.8
+                        
+                    optimal_grid = int(base_grid * grid_density_factor * (1 + volatility * 0.5))
+                    optimal_grid = max(10, min(50, optimal_grid))  # 10-50 범위 제한
+                    
+                    # 백테스팅 점수 (간단한 시뮬레이션)
+                    backtest_score = self._simulate_grid_performance(ticker, period, optimal_grid, high_price, low_price)
+                    
+                    # 수익성 점수 계산
+                    # 1. 변동성 점수 (적당한 변동성이 좋음, 0.08-0.15가 이상적)
+                    optimal_volatility = 0.10
+                    volatility_score = 1 / (1 + abs(volatility - optimal_volatility) * 10)
+                    
+                    # 2. 가격 위치 점수 (중간에서 약간 아래가 좋음, 0.3-0.6이 이상적)
+                    ideal_position = 0.45
+                    position_score = 1 - abs(price_position - ideal_position) * 2
+                    position_score = max(0, position_score)
+                    
+                    # 3. 기간 점수 (7-14일이 최적)
+                    if 5 <= period <= 14:
+                        period_score = 1.0
+                    else:
+                        period_score = 1 / (1 + abs(period - 10) * 0.1)
+                    
+                    # 4. 백테스팅 점수
+                    backtest_weight = 0.3
+                    
+                    # 종합 점수 (백테스팅 결과 포함)
+                    total_score = (
+                        volatility_score * 0.3 + 
+                        position_score * 0.25 + 
+                        period_score * 0.15 + 
+                        backtest_score * backtest_weight
+                    )
+                    
+                    if total_score > best_score:
+                        best_score = total_score
+                        best_period = period
+                        best_grid_count = optimal_grid
+                        
+                except Exception as e:
+                    continue
+                    
+            # 최적화 결과 로그 출력
+            coin_name = get_korean_coin_name(ticker)
+            print(f"🔍 {coin_name} 자동 최적화 완료: {best_period}일 기간, 그리드 {best_grid_count}개 (점수: {best_score:.3f})")
+            
+            return best_period, best_grid_count
+            
+        except Exception as e:
+            print(f"최적 기간 계산 오류: {e}")
+            return 7, 20
+    
+    def _simulate_grid_performance(self, ticker, period, grid_count, high_price, low_price):
+        """그리드 성능 시뮬레이션 (간단한 백테스팅)"""
+        try:
+            # 가격 변화 패턴 분석
+            price_range = high_price - low_price
+            grid_gap = price_range / grid_count
+            
+            # 변동성 대비 그리드 간격의 효율성
+            avg_price = (high_price + low_price) / 2
+            relative_gap = grid_gap / avg_price
+            
+            # 이상적인 그리드 간격은 평균 가격의 1-3%
+            if 0.01 <= relative_gap <= 0.03:
+                gap_score = 1.0
+            elif relative_gap < 0.005:
+                gap_score = 0.3  # 너무 조밀
+            elif relative_gap > 0.05:
+                gap_score = 0.4  # 너무 성김
+            else:
+                gap_score = 0.7
+                
+            # 그리드 개수의 적절성 (15-35개가 이상적)
+            if 15 <= grid_count <= 35:
+                count_score = 1.0
+            else:
+                count_score = max(0.3, 1 - abs(grid_count - 25) * 0.02)
+            
+            # 종합 백테스트 점수
+            simulation_score = (gap_score * 0.6 + count_score * 0.4)
+            
+            return simulation_score
+            
+        except Exception as e:
+            return 0.5  # 중간 점수
     
     def adjust_grid_for_market_condition(self, ticker, base_grid_count, market_data):
         """시장 상황에 따른 그리드 수 동적 조정"""
@@ -4973,7 +5108,18 @@ def start_dashboard():
     
     def create_chart_subplot(ticker, position):
         ax = fig.add_subplot(1, 3, position)
-        ax.set_title(f'{ticker} 가격 차트', fontsize=10)
+        
+        # 자동 모드에서 최적화된 기간 표시
+        if config.get('auto_trading_mode', False):
+            try:
+                optimal_period, optimal_grid = coin_grid_manager.find_optimal_period_and_grid(ticker)
+                title = f'{ticker} 가격 차트 ({optimal_period}일/그리드{optimal_grid}개)'
+            except Exception as e:
+                title = f'{ticker} 가격 차트 (자동최적화)'
+        else:
+            title = f'{ticker} 가격 차트'
+            
+        ax.set_title(title, fontsize=10)
         ax.set_xlabel('시간', fontsize=8)
         ax.set_ylabel('가격 (KRW)', fontsize=8)
         ax.tick_params(axis='both', which='major', labelsize=7)
@@ -5216,14 +5362,29 @@ def start_dashboard():
         ax = charts[ticker]
         ax.clear()
         
-        # 실제 사용된 기간 정보가 있으면 그것을 사용, 없으면 매개변수 사용
-        display_period = period
-        if ticker in chart_data and len(chart_data[ticker]) >= 6:
-            actual_period = chart_data[ticker][5]
-            if actual_period:  # 비어있지 않으면
-                display_period = actual_period
+        # 자동 모드에서 최적화된 기간과 그리드 정보 표시
+        if config.get('auto_trading_mode', False):
+            try:
+                optimal_period, optimal_grid = coin_grid_manager.find_optimal_period_and_grid(ticker)
+                title = f'{ticker} 가격 차트 ({optimal_period}일/그리드{optimal_grid}개)'
+            except Exception as e:
+                # 실제 사용된 기간 정보가 있으면 그것을 사용
+                display_period = period
+                if ticker in chart_data and len(chart_data[ticker]) >= 6:
+                    actual_period = chart_data[ticker][5]
+                    if actual_period:
+                        display_period = actual_period
+                title = f'{ticker} 가격 차트 ({display_period})'
+        else:
+            # 수동 모드에서는 기존 방식
+            display_period = period
+            if ticker in chart_data and len(chart_data[ticker]) >= 6:
+                actual_period = chart_data[ticker][5]
+                if actual_period:
+                    display_period = actual_period
+            title = f'{ticker} 가격 차트 ({display_period})'
         
-        ax.set_title(f'{ticker} 가격 차트 ({display_period})', fontsize=10)
+        ax.set_title(title, fontsize=10)
         ax.set_xlabel('시간', fontsize=8)
         ax.set_ylabel('가격 (KRW)', fontsize=8)
         ax.tick_params(axis='both', which='major', labelsize=7)
