@@ -748,7 +748,14 @@ class AutoOptimizationScheduler:
                         sold_qty, profit = check_and_sell_profitable_positions(ticker, demo_mode=True)
                         if sold_qty > 0:
                             korean_name = get_korean_coin_name(ticker)
-                            log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원")
+                            auto_sell_reason = "수익 실현 조건 만족으로 자동 매도"
+                            auto_sell_details = {
+                                "coin_name": korean_name,
+                                "sold_quantity": f"{sold_qty:.6f}개",
+                                "profit": f"{profit:,.0f}원",
+                                "trigger": "시간 기반 수익 실현 체크"
+                            }
+                            log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원", auto_sell_reason, auto_sell_details)
                             speak_async(f"{korean_name} 자동 수익 실현")
                     except Exception as e:
                         print(f"자동 매도 처리 오류 ({ticker}): {e}")
@@ -762,7 +769,14 @@ class AutoOptimizationScheduler:
                             sold_qty, profit = check_and_sell_profitable_positions(ticker, demo_mode=True)
                             if sold_qty > 0:
                                 korean_name = get_korean_coin_name(ticker)
-                                log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원")
+                                backup_sell_reason = "최적화 실패 시 백업 수익 실현"
+                                backup_sell_details = {
+                                    "coin_name": korean_name,
+                                    "sold_quantity": f"{sold_qty:.6f}개",
+                                    "profit": f"{profit:,.0f}원",
+                                    "trigger": "백업 수익 실현 체크"
+                                }
+                                log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원", backup_sell_reason, backup_sell_details)
                         except Exception as e:
                             print(f"자동 매도 처리 오류 ({ticker}): {e}")
                 
@@ -777,7 +791,14 @@ class AutoOptimizationScheduler:
                 if total_profit > 0 and updated_investment != current_investment:
                     config['total_investment'] = str(int(updated_investment))
                     save_config(config)
-                    log_trade("AUTO_SYSTEM", "비상수익재투자", f"수익: +{total_profit:,.0f}원")
+                    reinvest_reason = "오류 발생 시 비상 수익 재투자"
+                    reinvest_details = {
+                        "previous_investment": f"{current_investment:,.0f}원",
+                        "profit": f"{total_profit:,.0f}원",
+                        "new_investment": f"{updated_investment:,.0f}원",
+                        "trigger": "시스템 오류 시 안전 조치"
+                    }
+                    log_trade("AUTO_SYSTEM", "비상수익재투자", f"수익: +{total_profit:,.0f}원", reinvest_reason, reinvest_details)
             except:
                 pass
     
@@ -1503,7 +1524,16 @@ class CoinAllocationSystem:
                 
                 if abs(change) > total_investment * 0.05:  # 5% 이상 변화시에만 로그
                     change_percent = (change / total_investment) * 100
-                    log_trade(ticker, "투자금재분배", f"{old_allocation:,.0f}원 → {new_allocation:,.0f}원 ({change_percent:+.1f}%)")
+                    reallocation_reason = f"포트폴리오 최적화로 {change_percent:+.1f}% 조정"
+                    reallocation_details = {
+                        "old_allocation": f"{old_allocation:,.0f}원",
+                        "new_allocation": f"{new_allocation:,.0f}원",
+                        "change_amount": f"{change:+,.0f}원",
+                        "change_percent": f"{change_percent:+.1f}%",
+                        "total_investment": f"{total_investment:,.0f}원",
+                        "trigger": "포트폴리오 리밸런싱"
+                    }
+                    log_trade(ticker, "투자금재분배", f"{old_allocation:,.0f}원 → {new_allocation:,.0f}원 ({change_percent:+.1f}%)", reallocation_reason, reallocation_details)
             
             return new_allocations
             
@@ -1704,7 +1734,19 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
                 total_sold_quantity += quantity
                 total_profit += profit
                 
-                log_trade(ticker, sell_reason, f"{current_price:,.0f}원 ({quantity:.6f}개) 수익: {profit:,.0f}원")
+                # 수익권 포지션 매도 이유 상세 기록
+                position_sell_reason = f"{sell_reason} 조건 만족"
+                position_sell_details = {
+                    "buy_price": f"{buy_price:,.0f}원",
+                    "sell_price": f"{current_price:,.0f}원",
+                    "quantity": f"{quantity:.6f}개",
+                    "profit": f"{profit:,.0f}원",
+                    "profit_rate": f"{profit_rate:.1f}%",
+                    "highest_price": f"{highest_price:,.0f}원",
+                    "condition": sell_reason,
+                    "trigger": "자동 수익 실현"
+                }
+                log_trade(ticker, sell_reason, f"{current_price:,.0f}원 ({quantity:.6f}개) 수익: {profit:,.0f}원", position_sell_reason, position_sell_details)
                 
                 korean_name = get_korean_coin_name(ticker)
                 speak_async(f"{korean_name} {sell_reason} 매도 완료")
@@ -1750,7 +1792,16 @@ def update_investment_with_profits(original_investment, force_update=False):
             
             # 수익이 있고 이전 업데이트와 다른 경우에만 로그 기록
             if total_profit > 0 and (force_update or total_profit != last_investment_update_profit):
-                log_trade("SYSTEM", "투자금 업데이트", f"기존: {original_investment:,.0f}원 + 수익: {total_profit:,.0f}원 = 신규: {updated_investment:,.0f}원")
+                update_reason = f"실현 수익 {total_profit:,.0f}원 투자금 재투자"
+                update_details = {
+                    "original_investment": f"{original_investment:,.0f}원",
+                    "realized_profit": f"{total_profit:,.0f}원",
+                    "updated_investment": f"{updated_investment:,.0f}원",
+                    "growth_rate": f"{((updated_investment - original_investment) / original_investment * 100):+.2f}%",
+                    "force_update": "강제" if force_update else "자동",
+                    "trigger": "수익 복리 투자"
+                }
+                log_trade("SYSTEM", "투자금 업데이트", f"기존: {original_investment:,.0f}원 + 수익: {total_profit:,.0f}원 = 신규: {updated_investment:,.0f}원", update_reason, update_details)
                 speak_async(f"수익금 {total_profit:,.0f}원이 투자금에 포함되었습니다")
                 
             last_investment_update_time = current_time
@@ -2061,13 +2112,19 @@ def backup_corrupted_file(file_path):
     except Exception as e:
         print(f"손상된 파일 백업 오류: {e}")
 
-def log_trade(ticker, action, price):
-    """거래 로그 기록 (개선된 안전 버전)"""
+def log_trade(ticker, action, price, reason=None, details=None):
+    """거래 로그 기록 (개선된 안전 버전 - 매수/매도 이유 포함)"""
     entry = {
         'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'action': action,
         'price': f"{price:,.0f}원" if isinstance(price, (int, float)) else str(price)
     }
+    
+    # 매수/매도 이유 및 상세 정보 추가
+    if reason:
+        entry['reason'] = reason
+    if details:
+        entry['details'] = details
     
     try:
         # 안전한 로드
@@ -3063,7 +3120,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         loss = sell_value - buy_value - (sell_value * 0.0005)
                         total_realized_profit += loss
                         
-                        log_trade(ticker, "포트폴리오손절", f"{price:,.0f}원 ({pos['quantity']:.6f}개) 손실: {loss:,.0f}원")
+                        portfolio_reason = f"포트폴리오 전체 손실 {portfolio_loss_ratio:.1%} 초과"
+                        portfolio_details = {
+                            "total_loss_ratio": f"{portfolio_loss_ratio:.1%}",
+                            "stop_loss_threshold": f"{abs(risk_settings['stop_loss_threshold'])}%",
+                            "position_buy_price": f"{pos['buy_price']:,.0f}원",
+                            "position_sell_price": f"{price:,.0f}원",
+                            "quantity": f"{pos['quantity']:.6f}개",
+                            "position_loss": f"{loss:,.0f}원",
+                            "trigger": "포트폴리오 리스크 관리"
+                        }
+                        log_trade(ticker, "포트폴리오손절", f"{price:,.0f}원 ({pos['quantity']:.6f}개) 손실: {loss:,.0f}원", portfolio_reason, portfolio_details)
                     
                     demo_positions = []  # 모든 포지션 정리
                     save_trading_state(ticker, demo_positions, demo_mode)
@@ -3181,7 +3248,21 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 # 기술적 분석 정보 포함한 로그
                                 signal_info = f" (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)" if confidence > 50 else ""
                                 log_msg = f"하락추세 반전 매수: {buy_price:,.0f}원 ({quantity:.6f}개){signal_info}"
-                                log_and_update("데모 매수", log_msg)
+                                
+                                # 매수 결정 이유 상세 기록
+                                buy_reason = f"그리드 레벨 {lowest_grid_to_buy+1} 반등 확인"
+                                buy_details = {
+                                    "grid_price": f"{grid_levels[lowest_grid_to_buy]:,.0f}원",
+                                    "confirmation_price": f"{buy_confirmation_price:,.0f}원", 
+                                    "current_price": f"{price:,.0f}원",
+                                    "technical_signal": technical_signal,
+                                    "confidence": f"{confidence:.1f}%",
+                                    "override_status": "미적용" if not should_override else "적용",
+                                    "position_size": f"{actual_buy_amount:,.0f}원",
+                                    "market_sentiment": market_sentiment,
+                                    "panic_mode": "활성" if panic_mode else "비활성"
+                                }
+                                log_trade(ticker, "데모 매수", log_msg, buy_reason, buy_details)
                                 speak_async(f"데모 모드, {get_korean_coin_name(ticker)} {buy_price:,.0f}원에 최종 매수되었습니다.")
                                 send_kakao_message(f"[데모 최종매수] {get_korean_coin_name(ticker)} {buy_price:,.0f}원 ({quantity:.6f}개){signal_info}")
                                 
@@ -3189,7 +3270,15 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             # 기술적 분석이 매수를 방해하는 경우
                             if should_override:
                                 log_msg = f"매수 신호 무시 (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)"
-                                log_and_update("데모 매수취소", log_msg)
+                                cancel_reason = f"기술적 분석 override 신호"
+                                cancel_details = {
+                                    "grid_price": f"{grid_levels[lowest_grid_to_buy]:,.0f}원",
+                                    "current_price": f"{price:,.0f}원",
+                                    "technical_signal": technical_signal,
+                                    "confidence": f"{confidence:.1f}%",
+                                    "reason": "기술적 분석이 매수 반대 신호 발생"
+                                }
+                                log_trade(ticker, "데모 매수취소", log_msg, cancel_reason, cancel_details)
                             
                             # 데모 모드에서도 매수 횟수 증가
                             trade_counts[ticker]["buy"] += 1
@@ -3210,7 +3299,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             buy_pending = True
                             lowest_grid_to_buy = i
                             log_msg = f"매수 그리드 {grid_price:,.0f}원 도달. 매수 보류 시작."
-                            log_and_update("데모 매수보류", log_msg)
+                            reason = f"그리드 레벨 {i+1}/{len(grid_levels)} 도달"
+                            details = f"이전가격: {prev_price:,.0f}원 → 현재가격: {price:,.0f}원 (그리드가격: {grid_price:,.0f}원)"
+                            log_trade(ticker, "데모 매수보류", log_msg, reason, details)
                             speak_async(f"{get_korean_coin_name(ticker)} 매수 보류 시작")
                             update_gui('refresh_chart')
                             update_gui('action_status', 'looking_buy')
@@ -3251,7 +3342,24 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     print(f"프로스 저장: {ticker} 수익 {net_profit:,.0f}원 추가")  # 디버그
 
                     log_msg = f"{sell_reason} 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원"
-                    log_and_update("데모 매도", log_msg)
+                    
+                    # 손절/트레일링스탑 매도 이유 상세 기록
+                    sell_details = {
+                        "buy_price": f"{position['actual_buy_price']:,.0f}원",
+                        "sell_price": f"{price:,.0f}원",
+                        "highest_price": f"{position['highest_price']:,.0f}원",
+                        "quantity": f"{position['quantity']:.6f}개",
+                        "net_profit": f"{net_profit:,.0f}원",
+                        "stop_loss_threshold": f"{config.get('stop_loss_threshold', -10.0)}%",
+                        "trailing_stop_percent": f"{config.get('trailing_stop_percent', 3.0)}%" if config.get('trailing_stop', True) else "비활성"
+                    }
+                    
+                    if stop_loss_triggered:
+                        stop_reason = f"손절 기준 도달 ({position['actual_buy_price'] * (1 + config.get('stop_loss_threshold', -10.0) / 100):,.0f}원 하회)"
+                    else:
+                        stop_reason = f"트레일링스탑 기준 도달 (최고가 대비 {config.get('trailing_stop_percent', 3.0)}% 하락)"
+                    
+                    log_trade(ticker, "데모 매도", log_msg, stop_reason, sell_details)
                     speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     
@@ -3274,7 +3382,16 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         new_target_price = grid_levels[position['highest_grid_reached']]
                         position['target_sell_price'] = new_target_price
                         log_msg = f"매도 보류 및 목표 상향: {new_target_price:,.0f}원"
-                        log_and_update("데모 매도보류", log_msg)
+                        
+                        # 매도 보류 목표 상향 이유 기록
+                        hold_reason = f"상승 추세 지속으로 그리드 {current_highest_grid+2} 레벨 목표 상향"
+                        hold_details = {
+                            "previous_target": f"{grid_levels[current_highest_grid]:,.0f}원",
+                            "new_target": f"{new_target_price:,.0f}원",
+                            "current_price": f"{price:,.0f}원",
+                            "grid_level": f"{position['highest_grid_reached']+1}/{len(grid_levels)}"
+                        }
+                        log_trade(ticker, "데모 매도보류", log_msg, hold_reason, hold_details)
                         speak_async(f"{get_korean_coin_name(ticker)} " + "매도 보류 시작")
                         update_gui('refresh_chart')
                         update_gui('action_status', 'looking_sell')
@@ -3319,7 +3436,22 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 # 기술적 분석 정보 포함한 로그
                                 signal_info = f" (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)" if confidence > 50 else ""
                                 log_msg = f"상승추세 종료 매도: {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}"
-                                log_and_update("데모 매도", log_msg)
+                                
+                                # 그리드 매도 실행 이유 상세 기록
+                                grid_sell_reason = f"그리드 레벨 {current_highest_grid+1} 하락 확인"
+                                grid_sell_details = {
+                                    "buy_price": f"{position['actual_buy_price']:,.0f}원",
+                                    "sell_price": f"{sell_price:,.0f}원",
+                                    "grid_level": f"{current_highest_grid+1}/{len(grid_levels)}",
+                                    "confirmation_price": f"{sell_confirmation_price:,.0f}원",
+                                    "current_price": f"{price:,.0f}원",
+                                    "technical_signal": technical_signal,
+                                    "confidence": f"{confidence:.1f}%",
+                                    "override_status": "미적용" if not should_override else "적용",
+                                    "net_profit": f"{net_profit:,.0f}원",
+                                    "quantity": f"{position['quantity']:.6f}개"
+                                }
+                                log_trade(ticker, "데모 매도", log_msg, grid_sell_reason, grid_sell_details)
                                 speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
                                 send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}")
                                 
@@ -3327,7 +3459,15 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 # 기술적 분석이 매도를 방해하는 경우
                                 if should_override:
                                     log_msg = f"매도 신호 무시 (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)"
-                                    log_and_update("데모 매도취소", log_msg)
+                                    sell_cancel_reason = f"기술적 분석 override 신호"
+                                    sell_cancel_details = {
+                                        "grid_price": f"{grid_levels[current_highest_grid]:,.0f}원",
+                                        "current_price": f"{price:,.0f}원",
+                                        "technical_signal": technical_signal,
+                                        "confidence": f"{confidence:.1f}%",
+                                        "reason": "기술적 분석이 매도 반대 신호 발생"
+                                    }
+                                    log_trade(ticker, "데모 매도취소", log_msg, sell_cancel_reason, sell_cancel_details)
                             
                             # 데모 모드에서도 매도 횟수 증가
                             trade_counts[ticker]["sell"] += 1
@@ -3349,7 +3489,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         
                         if position['highest_grid_reached'] != -1:
                             log_msg = f"목표가 {position['target_sell_price']:,.0f}원 도달. 매도 보류 시작."
-                            log_and_update("데모 매도보류", log_msg)
+                            
+                            # 최초 매도 보류 시작 이유 기록
+                            initial_hold_reason = f"목표 그리드 가격 도달로 매도 보류 시작"
+                            initial_hold_details = {
+                                "buy_price": f"{position['actual_buy_price']:,.0f}원",
+                                "target_price": f"{position['target_sell_price']:,.0f}원",
+                                "current_price": f"{price:,.0f}원",
+                                "grid_level": f"{position['highest_grid_reached']+1}/{len(grid_levels)}",
+                                "quantity": f"{position['quantity']:.6f}개"
+                            }
+                            log_trade(ticker, "데모 매도보류", log_msg, initial_hold_reason, initial_hold_details)
                             speak_async(f"{get_korean_coin_name(ticker)} " + "매도 보류 시작")
                             update_gui('refresh_chart')
                             update_gui('action_status', 'looking_sell')
