@@ -1875,23 +1875,26 @@ def initialize_trade_counts_from_logs():
                 if ticker in trade_counts:
                     for log_entry in ticker_logs:
                         action = log_entry.get('action', '')
-                        # 실제 거래만 카운트 (데모 거래 제외)
-                        if '데모' not in action and '자동매도' not in action:
-                            if '매수' in action:
-                                trade_counts[ticker]["buy"] += 1
-                            elif '매도' in action:
-                                trade_counts[ticker]["sell"] += 1
-                                # 수익 거래 여부 확인 (details에서 수익 정보 확인)
-                                details = log_entry.get('details', {})
-                                if isinstance(details, dict):
-                                    profit_info = details.get('profit', '0')
-                                    if isinstance(profit_info, str) and '원' in profit_info:
-                                        try:
-                                            profit_value = int(profit_info.replace('원', '').replace(',', ''))
-                                            if profit_value > 0:
-                                                trade_counts[ticker]["profitable_sell"] += 1
-                                        except:
-                                            pass
+                        
+                        # 매수 거래 카운트 (보류 제외)
+                        if '매수' in action and '보류' not in action and '취소' not in action:
+                            trade_counts[ticker]["buy"] += 1
+                            
+                        # 매도 거래 카운트 (보류 제외)  
+                        elif '매도' in action and '보류' not in action and '취소' not in action and '자동매도' not in action:
+                            trade_counts[ticker]["sell"] += 1
+                            
+                            # 수익 거래 여부 확인 (details에서 수익 정보 확인)
+                            details = log_entry.get('details', {})
+                            if isinstance(details, dict):
+                                profit_info = details.get('profit', '0')
+                                if isinstance(profit_info, str) and '원' in profit_info:
+                                    try:
+                                        profit_value = int(profit_info.replace('원', '').replace(',', ''))
+                                        if profit_value > 0:
+                                            trade_counts[ticker]["profitable_sell"] += 1
+                                    except:
+                                        pass
                                             
         print(f"📊 거래 횟수 초기화 완료:")
         for ticker, counts in trade_counts.items():
@@ -4168,6 +4171,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             speak_async(f"실거래 매수 완료, {get_korean_coin_name(ticker)} {price:,.0f}원")
                             
                             print(f"🔥 실거래 매수 완료: {quantity:.8f}개 @ {price:,.0f}원")
+                            # 거래 횟수는 execute_buy_order에서 이미 증가됨
+                            update_gui('refresh_chart')  # GUI 즉시 새로고침
                         else:
                             print(f"❌ 실거래 매수 실패: API 응답 오류")
                             log_trade(ticker, "매수 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(buy_result)})
@@ -4212,10 +4217,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             
                             print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
                             
-                            # 매도 횟수 증가
-                            trade_counts[ticker]["sell"] += 1
+                            # 수익 거래 횟수 증가 (매도 횟수는 execute_sell_order에서 이미 증가됨)
                             if net_profit > 0:
                                 trade_counts[ticker]["profitable_sell"] += 1
+                            
+                            update_gui('refresh_chart')  # GUI 즉시 새로고침
                                 
                         else:
                             print(f"❌ 실거래 매도 실패: API 응답 오류")
@@ -6282,4 +6288,6 @@ def start_dashboard():
 
 if __name__ == "__main__":
     initialize_files()
+    # 앱 시작 시 거래 횟수 초기화 (기존 로그 기반으로)
+    initialize_trade_counts_from_logs()
     start_dashboard()
