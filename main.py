@@ -201,7 +201,7 @@ default_config = {
     "fee_rate": 0.0005,  # 거래 수수료율 (0.05%)
     "auto_trading_mode": False,  # 완전 자동 거래 모드
     "risk_mode": "보수적",  # 리스크 모드 (보수적, 안정적, 공격적, 극공격적)
-    "auto_update_interval": 60,  # 자동 최적화 간격 (분) - 1시간
+    "auto_update_interval": 15,  # 자동 최적화 간격 (분) - 15분
     "performance_tracking": True,  # 실적 추적 활성화
     "auto_optimization": True,  # 자동 최적화 활성화
     # 코인별 그리드 설정
@@ -272,9 +272,10 @@ class CoinSpecificGridManager:
             coin_name = get_korean_coin_name(ticker)
             print(f"⚙️ {coin_name} 그리드 계산 - 자동모드: {auto_mode}")
             
-            # 자동 모드에서는 고급 최적화 알고리즘 사용
+            # 자동 모드에서는 설정된 그리드 수 사용 (최적화는 별도 스케줄러에서 처리)
             if auto_mode:
-                _, optimal_grid_count = self.find_optimal_period_and_grid(ticker)
+                coin_config = self.coin_profiles.get(ticker, self.coin_profiles["KRW-BTC"])
+                optimal_grid_count = coin_config.get('grid_count', 20)
                 print(f"⚙️ {coin_name} 자동 그리드: {optimal_grid_count}개")
                 return optimal_grid_count
                 
@@ -318,7 +319,9 @@ class CoinSpecificGridManager:
         print(f"📊 {coin_name} 기간 계산 - 자동모드: {auto_mode}")
         
         if auto_mode:
-            optimal_period, _ = self.find_optimal_period_and_grid(ticker)
+            # 설정된 기간 사용 (최적화는 별도 스케줄러에서 처리)
+            coin_config = self.coin_profiles.get(ticker, self.coin_profiles["KRW-BTC"])
+            optimal_period = coin_config.get('price_range_days', 7) * 24  # 일 단위를 시간으로 변환
             return optimal_period
         
         # 수동 모드에서는 설정된 기간 사용 (시간 단위)
@@ -972,8 +975,8 @@ class AutoOptimizationScheduler:
     
     def _optimization_worker(self, update_callback):
         """자동 최적화 작업자"""
-        interval_minutes = config.get('auto_update_interval', 60)
-        print(f"🤖 자동 최적화 워커 시작 - {interval_minutes}분(1시간) 간격으로 실행")
+        interval_minutes = config.get('auto_update_interval', 15)
+        print(f"🤖 자동 최적화 워커 시작 - {interval_minutes}분 간격으로 실행")
         print(f"⏰ 첫 번째 자동 최적화까지 {interval_minutes}분 대기...")
         
         while not self.stop_optimization:
@@ -986,8 +989,8 @@ class AutoOptimizationScheduler:
                         return
                     time.sleep(10)
                     
-                    # 매 10분마다 상태 출력 (60회 = 10분)
-                    if (i + 1) % 60 == 0:
+                    # 매 5분마다 상태 출력 (30회 = 5분)
+                    if (i + 1) % 30 == 0:
                         remaining_minutes = (total_checks - i - 1) / 6
                         print(f"⏱️ 자동 최적화까지 약 {remaining_minutes:.0f}분 남음")
                 
@@ -1004,7 +1007,7 @@ class AutoOptimizationScheduler:
                     print("❌ 조건 불만족 - 최적화 건너뜀")
                     
                 # 최적화 완료 후 다음 사이클을 위해 간격 다시 확인
-                interval_minutes = config.get('auto_update_interval', 60)
+                interval_minutes = config.get('auto_update_interval', 15)
                 print(f"⏰ 다음 자동 최적화까지 {interval_minutes}분 대기...")
                     
             except Exception as e:
@@ -4989,7 +4992,7 @@ def start_dashboard():
     auto_mode_label = ttk.Label(status_info_frame, text="🔴 자동 모드: 비활성", foreground="red", font=('Helvetica', 9, 'bold'))
     auto_mode_label.grid(row=0, column=0, sticky='w', padx=3)
     
-    update_interval_label = ttk.Label(status_info_frame, text=f"⏰ 자동최적화: {config.get('auto_update_interval', 60)}분(1시간)", foreground="purple", font=('Helvetica', 8))
+    update_interval_label = ttk.Label(status_info_frame, text=f"⏰ 자동최적화: {config.get('auto_update_interval', 15)}분", foreground="purple", font=('Helvetica', 8))
     update_interval_label.grid(row=1, column=0, sticky='w', padx=3)
     
     risk_mode_status_label = ttk.Label(status_info_frame, text=f"⚡ 리스크: {config.get('risk_mode', '안정적')}", foreground="blue", font=('Helvetica', 9, 'bold'))
@@ -5039,7 +5042,7 @@ def start_dashboard():
     # 자동 최적화 간격 설정
     ttk.Label(control_frame, text="자동최적화 간격(분):").grid(row=2, column=0, sticky='w', padx=3, pady=1)
     update_interval_entry = ttk.Entry(control_frame, width=15)
-    update_interval_entry.insert(0, str(config.get("auto_update_interval", 60)))
+    update_interval_entry.insert(0, str(config.get("auto_update_interval", 15)))
     update_interval_entry.grid(row=2, column=1, sticky='w', padx=3)
     
     # 자동거래 상태 업데이트 함수들
@@ -5055,7 +5058,7 @@ def start_dashboard():
         risk_mode_status_label.config(text=f"⚡ 리스크: {risk_mode}", foreground=risk_colors.get(risk_mode, "blue"))
         
         # 자동 최적화 간격 표시
-        update_interval_label.config(text=f"⏰ 자동최적화: {config.get('auto_update_interval', 60)}분(1시간)")
+        update_interval_label.config(text=f"⏰ 자동최적화: {config.get('auto_update_interval', 15)}분")
         
     
     def update_action_status(ticker, status_type):
@@ -5388,7 +5391,7 @@ def start_dashboard():
             try:
                 config["auto_update_interval"] = int(update_interval_entry.get())
             except ValueError:
-                config["auto_update_interval"] = 60  # 기본값
+                config["auto_update_interval"] = 15  # 기본값
                 
             save_config(config)
             
@@ -5728,11 +5731,13 @@ def start_dashboard():
     def create_chart_subplot(ticker, position):
         ax = fig.add_subplot(1, 3, position)
         
-        # 자동 모드에서 최적화된 기간 표시
+        # 자동 모드에서 현재 설정 표시
         if config.get('auto_trading_mode', False):
             try:
-                optimal_period, optimal_grid = coin_grid_manager.find_optimal_period_and_grid(ticker)
-                title = f'{ticker} 가격 차트 ({optimal_period}일/그리드{optimal_grid}개)'
+                coin_config = coin_grid_manager.coin_profiles.get(ticker, coin_grid_manager.coin_profiles["KRW-BTC"])
+                grid_count = coin_config.get('grid_count', 20)
+                period_days = coin_config.get('price_range_days', 7)
+                title = f'{ticker} 가격 차트 ({period_days}일/그리드{grid_count}개)'
             except Exception as e:
                 title = f'{ticker} 가격 차트 (자동최적화)'
         else:
@@ -5981,11 +5986,13 @@ def start_dashboard():
         ax = charts[ticker]
         ax.clear()
         
-        # 자동 모드에서 최적화된 기간과 그리드 정보 표시
+        # 자동 모드에서 현재 설정 표시
         if config.get('auto_trading_mode', False):
             try:
-                optimal_period, optimal_grid = coin_grid_manager.find_optimal_period_and_grid(ticker)
-                title = f'{ticker} 가격 차트 ({optimal_period}일/그리드{optimal_grid}개)'
+                coin_config = coin_grid_manager.coin_profiles.get(ticker, coin_grid_manager.coin_profiles["KRW-BTC"])
+                grid_count = coin_config.get('grid_count', 20)
+                period_days = coin_config.get('price_range_days', 7)
+                title = f'{ticker} 가격 차트 ({period_days}일/그리드{grid_count}개)'
             except Exception as e:
                 # 실제 사용된 기간 정보가 있으면 그것을 사용
                 display_period = period
