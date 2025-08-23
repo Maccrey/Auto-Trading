@@ -770,11 +770,11 @@ class AutoOptimizationScheduler:
             
         except Exception as e:
             print(f"최적화 수행 중 오류: {e}")
-            # 오류 발생시에도 기본적인 수익 실현 기능은 수행
+            # 오류 발생시에도 기본적인 수익 실현 기능은 수행 (중복 방지)
             try:
                 current_investment = float(config.get('total_investment', 100000000))
-                updated_investment, total_profit = update_investment_with_profits(current_investment)
-                if total_profit > 0:
+                updated_investment, total_profit = update_investment_with_profits(current_investment, force_update=False)
+                if total_profit > 0 and updated_investment != current_investment:
                     config['total_investment'] = str(int(updated_investment))
                     save_config(config)
                     log_trade("AUTO_SYSTEM", "비상수익재투자", f"수익: +{total_profit:,.0f}원")
@@ -1292,17 +1292,35 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
         print(f"수익권 포지션 매도 오류: {e}")
         return 0, 0
 
-def update_investment_with_profits(original_investment):
-    """수익금을 포함하여 투자금 재계산"""
+# 투자금 업데이트 락
+investment_update_lock = threading.Lock()
+last_investment_update_time = 0
+last_investment_update_profit = 0
+
+def update_investment_with_profits(original_investment, force_update=False):
+    """수익금을 포함하여 투자금 재계산 (중복 방지)"""
+    global last_investment_update_time, last_investment_update_profit
+    
     try:
-        total_profit = calculate_total_realized_profit()
-        updated_investment = original_investment + total_profit
-        
-        if total_profit > 0:
-            log_trade("SYSTEM", "투자금 업데이트", f"기존: {original_investment:,.0f}원 + 수익: {total_profit:,.0f}원 = 신규: {updated_investment:,.0f}원")
-            speak_async(f"수익금 {total_profit:,.0f}원이 투자금에 포함되었습니다")
-        
-        return updated_investment, total_profit
+        with investment_update_lock:
+            current_time = time.time()
+            
+            # 5초 이내의 중복 업데이트 방지 (force_update가 True가 아닌 경우)
+            if not force_update and (current_time - last_investment_update_time < 5):
+                return original_investment + last_investment_update_profit, last_investment_update_profit
+            
+            total_profit = calculate_total_realized_profit()
+            updated_investment = original_investment + total_profit
+            
+            # 수익이 있고 이전 업데이트와 다른 경우에만 로그 기록
+            if total_profit > 0 and (force_update or total_profit != last_investment_update_profit):
+                log_trade("SYSTEM", "투자금 업데이트", f"기존: {original_investment:,.0f}원 + 수익: {total_profit:,.0f}원 = 신규: {updated_investment:,.0f}원")
+                speak_async(f"수익금 {total_profit:,.0f}원이 투자금에 포함되었습니다")
+                
+            last_investment_update_time = current_time
+            last_investment_update_profit = total_profit
+            
+            return updated_investment, total_profit
     except Exception as e:
         print(f"투자금 업데이트 오류: {e}")
         return original_investment, 0
@@ -2232,33 +2250,21 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         if sold_quantity > 0:
             log_and_update('수익실현', f'{sold_quantity:.6f}개 매도완료, 수익: {profit_amount:,.0f}원')
         
-        # 2단계: 수익금을 포함하여 투자금 재계산
-        updated_investment, total_profit = update_investment_with_profits(total_investment)
-        if total_profit > 0:
-            total_investment = updated_investment  # 투자금에 수익 반영
+        # 2단계: 투자금은 이미 start_trading에서 업데이트되었으므로 여기서는 생략
+        # (중복 업데이트 방지)
+        
+        # 자동모드인 경우 리스크 설정 재적용
+        if config.get('auto_trading_mode', False):
+            # 리스크 설정 재적용
+            risk_settings = auto_trading_system.get_risk_settings(config.get('risk_mode', '안정적'))
+            max_investment_ratio = risk_settings['max_investment_ratio']
+            adjusted_investment = total_investment * max_investment_ratio
             
-            # 자동모드인 경우 모든 설정을 재조정
-            if config.get('auto_trading_mode', False):
-                # 그리드 개수 재계산
-                if config.get('auto_grid_count', True):
-                    grid_count = calculate_auto_grid_count_enhanced(
-                        high_price, low_price, 
-                        config.get('fee_rate', 0.0005), 
-                        total_investment,
-                        ticker  # 코인별 최적화를 위해 ticker 전달
-                    )
-                    log_and_update('자동재계산', f"수익 반영 후 최적 그리드: {grid_count}개")
-                
-                # 리스크 설정 재적용
-                risk_settings = auto_trading_system.get_risk_settings(config.get('risk_mode', '안정적'))
-                max_investment_ratio = risk_settings['max_investment_ratio']
-                adjusted_investment = total_investment * max_investment_ratio
-                
-                # 그리드 개수 제한 재적용
-                max_grids = risk_settings['max_grid_count']
-                if grid_count > max_grids:
-                    grid_count = max_grids
-                    log_and_update('리스크재조정', f"그리드 개수 제한: {max_grids}개")
+            # 그리드 개수 제한 재적용
+            max_grids = risk_settings['max_grid_count']
+            if grid_count > max_grids:
+                grid_count = max_grids
+                log_and_update('리스크재조정', f"그리드 개수 제한: {max_grids}개")
         
         # 2.5단계: 거래 재개 시에도 투자금 분배 재계산
         active_coins = [coin for coin in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP'] 
@@ -3858,13 +3864,17 @@ def start_dashboard():
             
             # 거래 재개 시 수익 재투자 처리
             if should_resume:
-                # 수익금을 포함한 업데이트된 투자금 계산
-                updated_investment, total_profit = update_investment_with_profits(total_investment)
+                # 수익금을 포함한 업데이트된 투자금 계산 (force_update=True로 강제 업데이트)
+                updated_investment, total_profit = update_investment_with_profits(total_investment, force_update=True)
                 if total_profit > 0:
                     # UI에 업데이트된 투자금 반영
                     amount_entry.delete(0, tk.END)
                     amount_entry.insert(0, str(int(updated_investment)))
                     total_investment = updated_investment
+                    
+                    # config.json 파일에도 업데이트된 투자금 저장
+                    config['total_investment'] = str(int(updated_investment))
+                    save_config(config)
                     
                     # 자동모드인 경우 그리드 개수도 재계산
                     if auto_grid_var.get() and config.get('auto_trading_mode', False):
