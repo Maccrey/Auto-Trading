@@ -972,15 +972,13 @@ class AutoOptimizationScheduler:
     
     def _optimization_worker(self, update_callback):
         """자동 최적화 작업자"""
-        print(f"🤖 자동 최적화 워커 시작 - 1시간({config.get('auto_update_interval', 60)}분) 간격으로 실행")
+        interval_minutes = config.get('auto_update_interval', 60)
+        print(f"🤖 자동 최적화 워커 시작 - {interval_minutes}분(1시간) 간격으로 실행")
+        print(f"⏰ 첫 번째 자동 최적화까지 {interval_minutes}분 대기...")
         
         while not self.stop_optimization:
             try:
-                # 설정에서 간격 확인
-                interval_minutes = config.get('auto_update_interval', 60)
-                print(f"⏰ 다음 자동 최적화까지 {interval_minutes}분(1시간) 대기 시작...")
-                
-                # 간격만큼 대기 (10초씩 체크하여 중단 신호 확인)
+                # 먼저 설정된 간격만큼 대기
                 total_checks = int(interval_minutes * 6)  # 60분 = 360회 * 10초
                 for i in range(total_checks):
                     if self.stop_optimization:
@@ -993,6 +991,7 @@ class AutoOptimizationScheduler:
                         remaining_minutes = (total_checks - i - 1) / 6
                         print(f"⏱️ 자동 최적화까지 약 {remaining_minutes:.0f}분 남음")
                 
+                # 대기 완료 후 최적화 실행 조건 체크
                 print(f"🔍 자동 최적화 실행 조건 체크...")
                 print(f"  - 자동 모드: {config.get('auto_trading_mode', False)}")
                 print(f"  - 자동 최적화: {config.get('auto_optimization', True)}")
@@ -1003,6 +1002,10 @@ class AutoOptimizationScheduler:
                     self._perform_optimization(update_callback)
                 else:
                     print("❌ 조건 불만족 - 최적화 건너뜀")
+                    
+                # 최적화 완료 후 다음 사이클을 위해 간격 다시 확인
+                interval_minutes = config.get('auto_update_interval', 60)
+                print(f"⏰ 다음 자동 최적화까지 {interval_minutes}분 대기...")
                     
             except Exception as e:
                 print(f"❗ 자동 최적화 오류: {e}")
@@ -5377,10 +5380,7 @@ def start_dashboard():
             config["demo_mode"] = demo_var.get()
             config["auto_grid_count"] = auto_grid_var.get()
             
-            # 자동 모드에서는 거래 시작 시 최적화 실행
-            if config.get('auto_trading_mode', False):
-                print("🚀 자동 모드 활성화 - 거래 시작 전 최적화 실행...")
-                coin_grid_manager.force_optimization_for_all_coins()
+            # 자동 모드에서는 스케줄러가 최적화를 담당하므로 여기서는 실행하지 않음
             config["auto_trading_mode"] = auto_trading_var.get()
             config["risk_mode"] = risk_mode_combo.get()
             
