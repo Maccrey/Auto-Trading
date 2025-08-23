@@ -190,7 +190,7 @@ default_config = {
     "kakao_enabled": True, # 카카오톡 알림 사용
     "total_investment": "100000",
     "grid_count": "10",
-    "period": "4시간",
+    "period": "1시간",  # 단타 거래를 위한 기본값
     "target_profit_percent": "",
     "demo_mode": 1,
     "use_custom_range": False,  # 사용자 지정 가격 범위 사용
@@ -208,27 +208,27 @@ default_config = {
     "coin_specific_grids": {
         "KRW-BTC": {
             "enabled": True,
-            "grid_count": 20,
-            "price_range_days": 7,
+            "grid_count": 15,
+            "price_range_hours": 4,  # 4시간 기준 단타 거래
             "volatility_multiplier": 1.0,
-            "min_grid_count": 10,
-            "max_grid_count": 50
+            "min_grid_count": 8,
+            "max_grid_count": 25
         },
         "KRW-ETH": {
             "enabled": True,
-            "grid_count": 25,
-            "price_range_days": 5,
+            "grid_count": 18,
+            "price_range_hours": 2,  # 2시간 기준 단타 거래 (높은 변동성)
             "volatility_multiplier": 1.2,
-            "min_grid_count": 15,
-            "max_grid_count": 60
+            "min_grid_count": 10,
+            "max_grid_count": 30
         },
         "KRW-XRP": {
             "enabled": True,
-            "grid_count": 30,
-            "price_range_days": 3,
+            "grid_count": 20,
+            "price_range_hours": 1,  # 1시간 기준 단타 거래 (매우 높은 변동성)
             "volatility_multiplier": 1.5,
-            "min_grid_count": 20,
-            "max_grid_count": 80
+            "min_grid_count": 12,
+            "max_grid_count": 35
         }
     }
 }
@@ -310,8 +310,8 @@ class CoinSpecificGridManager:
             print(f"코인별 그리드 계산 오류 ({ticker}): {e}")
             return 20  # 기본값
     
-    def get_price_range_days(self, ticker):
-        """코인별 가격 범위 계산 기간 반환 (자동 최적화 포함)"""
+    def get_price_range_hours(self, ticker):
+        """코인별 가격 범위 계산 기간 반환 (시간 단위, 자동 최적화 포함)"""
         # 자동 모드에서는 최적 기간 계산
         auto_mode = config.get('auto_trading_mode', False)
         coin_name = get_korean_coin_name(ticker)
@@ -321,10 +321,10 @@ class CoinSpecificGridManager:
             optimal_period, _ = self.find_optimal_period_and_grid(ticker)
             return optimal_period
         
-        # 수동 모드에서는 설정된 기간 사용
+        # 수동 모드에서는 설정된 기간 사용 (시간 단위)
         coin_config = config.get('coin_specific_grids', {}).get(ticker, {})
-        manual_period = coin_config.get('price_range_days', 7)
-        print(f"📊 {coin_name} 수동 기간: {manual_period}일")
+        manual_period = coin_config.get('price_range_hours', 4)  # 기본 4시간
+        print(f"📊 {coin_name} 수동 기간: {manual_period}시간")
         return manual_period
     
     def find_optimal_period_and_grid(self, ticker):
@@ -333,11 +333,11 @@ class CoinSpecificGridManager:
             coin_name = get_korean_coin_name(ticker)
             print(f"🔍 {coin_name} 자동 최적화 시작...")
             
-            # 여러 기간을 테스트
-            test_periods = [3, 5, 7, 10, 14, 21, 30]
+            # 단타를 위한 짧은 기간 테스트 (시간 단위)
+            test_periods = [0.5, 1, 2, 4, 6, 12]  # 30분~12시간
             best_score = -1
-            best_period = 7
-            best_grid_count = 20
+            best_period = 4  # 기본 4시간
+            best_grid_count = 15
             
             current_price = pyupbit.get_current_price(ticker)
             if not current_price:
@@ -345,8 +345,8 @@ class CoinSpecificGridManager:
                 
             for period in test_periods:
                 try:
-                    # 각 기간별로 가격 범위 계산
-                    high_price, low_price = calculate_price_range(ticker, period)
+                    # 각 기간별로 가격 범위 계산 (시간 단위)
+                    high_price, low_price = calculate_price_range_hours(ticker, period)
                     if high_price <= low_price:
                         continue
                         
@@ -383,11 +383,11 @@ class CoinSpecificGridManager:
                     position_score = 1 - abs(price_position - ideal_position) * 2
                     position_score = max(0, position_score)
                     
-                    # 3. 기간 점수 (7-14일이 최적)
-                    if 5 <= period <= 14:
+                    # 3. 기간 점수 (2-6시간이 단타에 최적)
+                    if 2 <= period <= 6:
                         period_score = 1.0
                     else:
-                        period_score = 1 / (1 + abs(period - 10) * 0.1)
+                        period_score = 1 / (1 + abs(period - 4) * 0.1)
                     
                     # 4. 백테스팅 점수
                     backtest_weight = 0.3
@@ -410,7 +410,7 @@ class CoinSpecificGridManager:
                     
             # 최적화 결과 로그 출력
             coin_name = get_korean_coin_name(ticker)
-            print(f"🔍 {coin_name} 자동 최적화 완료: {best_period}일 기간, 그리드 {best_grid_count}개 (점수: {best_score:.3f})")
+            print(f"🔍 {coin_name} 자동 최적화 완료: {best_period}시간 기간, 그리드 {best_grid_count}개 (점수: {best_score:.3f})")
             
             return best_period, best_grid_count
             
@@ -444,7 +444,7 @@ class CoinSpecificGridManager:
                 if ticker not in config['coin_specific_grids']:
                     config['coin_specific_grids'][ticker] = {}
                     
-                config['coin_specific_grids'][ticker]['price_range_days'] = optimal_period
+                config['coin_specific_grids'][ticker]['price_range_hours'] = optimal_period
                 config['coin_specific_grids'][ticker]['grid_count'] = optimal_grid
                 
             except Exception as e:
@@ -2512,11 +2512,11 @@ def calculate_enhanced_price_range(ticker, period, use_custom_range=False, custo
     """코인별 최적화된 가격 범위 계산"""
     actual_period = period
     
-    # 코인별 설정 기간 사용
+    # 코인별 설정 기간 사용 (시간 단위)
     if config.get('auto_trading_mode', False):
-        coin_period = coin_grid_manager.get_price_range_days(ticker)
-        if coin_period != period:
-            actual_period = f"{coin_period}일"
+        coin_hours = coin_grid_manager.get_price_range_hours(ticker)
+        if coin_hours != period:
+            actual_period = f"{coin_hours}시간"
             print(f"{get_korean_coin_name(ticker)} 코인별 가격범위 기간: {actual_period}")
     
     """향상된 가격 범위 계산 (사용자 지정 범위 및 자동 그리드 개수 고려)"""
@@ -2529,9 +2529,33 @@ def calculate_enhanced_price_range(ticker, period, use_custom_range=False, custo
         except (ValueError, TypeError):
             pass
     
-    # 기존 범위 계산 로직 사용 (실제 기간은 숫자값 필요)
-    period_for_calc = coin_grid_manager.get_price_range_days(ticker) if config.get('auto_trading_mode', False) else period
-    high_price, low_price = calculate_price_range(ticker, period_for_calc)
+    # 시간 기반 범위 계산 로직 사용
+    if config.get('auto_trading_mode', False):
+        hours_for_calc = coin_grid_manager.get_price_range_hours(ticker)
+        high_price, low_price = calculate_price_range_hours(ticker, hours_for_calc)
+    else:
+        # 기본 시간으로 변환 (기존 period가 문자열인 경우)
+        if isinstance(period, str):
+            if "30분" in period:
+                hours_for_calc = 0.5
+            elif "1시간" in period:
+                hours_for_calc = 1
+            elif "2시간" in period:
+                hours_for_calc = 2
+            elif "4시간" in period:
+                hours_for_calc = 4
+            elif "12시간" in period:
+                hours_for_calc = 12
+            elif "1일" in period:
+                hours_for_calc = 24
+            elif "7일" in period:
+                hours_for_calc = 168
+            else:
+                hours_for_calc = 1  # 기본값을 1시간으로 변경
+        else:
+            hours_for_calc = period
+        high_price, low_price = calculate_price_range_hours(ticker, hours_for_calc)
+    
     return high_price, low_price, actual_period
 
 def calculate_dynamic_grid(base_low, base_high, current_price, panic_mode=False):
@@ -2627,6 +2651,83 @@ def evaluate_status(profit_percent, is_trading=False, panic_mode=False):
         return "주의", "Orange.TLabel"
     else:
         return "위험", "Red.TLabel"
+
+# 가격 범위 캐시 시스템
+price_range_cache = {}
+cache_timeout = {}  # 캐시 만료 시간 저장
+
+def get_cache_timeout_minutes(hours):
+    """시간 기준에 따른 캐시 유지 시간 결정"""
+    if hours <= 1:
+        return 5    # 1시간 이하: 5분 캐시
+    elif hours <= 4:
+        return 15   # 4시간 이하: 15분 캐시
+    elif hours <= 12:
+        return 30   # 12시간 이하: 30분 캐시
+    else:
+        return 60   # 그 이상: 60분 캐시
+
+def calculate_price_range_hours(ticker, hours):
+    """시간 기준 가격 범위 계산 (캐시 시스템 포함)"""
+    cache_key = f"{ticker}_{hours}h"
+    current_time = datetime.now()
+    
+    # 캐시 확인
+    if cache_key in price_range_cache and cache_key in cache_timeout:
+        cache_expire_time = cache_timeout[cache_key]
+        if current_time < cache_expire_time:
+            print(f"📦 {get_korean_coin_name(ticker)} {hours}시간 가격범위 캐시 사용")
+            return price_range_cache[cache_key]
+    
+    print(f"🔍 {get_korean_coin_name(ticker)} {hours}시간 가격범위 계산 시작...")
+    
+    # 최대 3번 재시도
+    for attempt in range(3):
+        try:
+            print(f"   시도 {attempt + 1}/3...")
+            
+            # 시간에 따른 데이터 요청
+            if hours <= 0.5:  # 30분 이하
+                df = pyupbit.get_ohlcv(ticker, interval="minute3", count=10)  # 30분 = 10개 3분봉
+            elif hours <= 1:
+                df = pyupbit.get_ohlcv(ticker, interval="minute5", count=12)  # 1시간 = 12개 5분봉
+            elif hours <= 4:
+                df = pyupbit.get_ohlcv(ticker, interval="minute15", count=16)  # 4시간 = 16개 15분봉
+            elif hours <= 12:
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=int(hours))  # N시간 = N개 1시간봉
+            else:
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=int(hours))  # N시간 = N개 1시간봉
+            
+            if df is None:
+                print(f"   ❌ 데이터가 None입니다. (시도 {attempt + 1}/3)")
+                continue
+                
+            if df.empty:
+                print(f"   ❌ 데이터가 비어있습니다. (시도 {attempt + 1}/3)")
+                continue
+            
+            high_price = float(df['high'].max())
+            low_price = float(df['low'].min())
+            
+            if high_price <= low_price:
+                print(f"   ❌ 잘못된 가격 범위: 최고가({high_price}) <= 최저가({low_price})")
+                continue
+            
+            print(f"   ✅ 성공: 최고가 {high_price:,.0f}원, 최저가 {low_price:,.0f}원")
+            
+            # 캐시에 저장
+            price_range_cache[cache_key] = (high_price, low_price)
+            cache_minutes = get_cache_timeout_minutes(hours)
+            cache_timeout[cache_key] = current_time + timedelta(minutes=cache_minutes)
+            print(f"   💾 캐시 저장: {cache_minutes}분간 유지")
+            
+            return high_price, low_price
+            
+        except Exception as e:
+            print(f"   ❌ 오류 발생 (시도 {attempt + 1}/3): {e}")
+            
+    print(f"❌ {get_korean_coin_name(ticker)} {hours}시간 가격 범위 계산 실패")
+    return None, None
 
 # 가격 범위 계산 함수
 def calculate_price_range(ticker, period):
@@ -3032,13 +3133,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             # 오더북 데이터가 있는 경우 추가 검사
             if orderbook:
-                if not orderbook.get('orderbook_units') or len(orderbook['orderbook_units']) == 0:
+                orderbook_units = orderbook.get('orderbook_units')
+                if not orderbook_units or not isinstance(orderbook_units, list) or len(orderbook_units) == 0:
                     return False, "오더북 데이터 없음"
                 
-                # 매수/매도 호가 존재 여부 확인
-                first_unit = orderbook['orderbook_units'][0]
-                if not first_unit.get('bid_price') or not first_unit.get('ask_price'):
-                    return False, "매수/매도 호가 데이터 오류"
+                # 매수/매도 호가 존재 여부 확인 (안전한 접근)
+                try:
+                    first_unit = orderbook_units[0]
+                    if not isinstance(first_unit, dict) or not first_unit.get('bid_price') or not first_unit.get('ask_price'):
+                        return False, "매수/매도 호가 데이터 오류"
+                except (IndexError, TypeError, KeyError):
+                    return False, "오더북 첫 번째 유닛 접근 오류"
                 
                 # 스프레드 이상치 검사 (현재가 대비 5% 이상 차이나면 오류로 간주)
                 bid_price = first_unit['bid_price']
@@ -3483,10 +3588,18 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 time.sleep(1)
                 continue
                 
-            # API 데이터 유효성 검사
+            # API 데이터 유효성 검사 (더 안전한 방식)
             try:
                 orderbook = pyupbit.get_orderbook(ticker)
-            except:
+                # 오더북 데이터 기본 검증
+                if orderbook and isinstance(orderbook, dict) and 'orderbook_units' in orderbook:
+                    orderbook_units = orderbook.get('orderbook_units', [])
+                    if not isinstance(orderbook_units, list) or len(orderbook_units) == 0:
+                        orderbook = None
+                else:
+                    orderbook = None
+            except Exception as e:
+                print(f"오더북 조회 오류: {e}")
                 orderbook = None
             
             is_valid, error_msg = check_api_data_validity(price, orderbook)
@@ -3494,7 +3607,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 log_and_update('API오류', f'{error_msg}')
                 update_gui('action_status', 'error')
                 update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
-                time.sleep(5)  # API 오류 시 5초 대기 후 재시도
+                time.sleep(3)  # API 오류 시 3초 대기 후 재시도 (5초->3초 단축)
                 continue
             
             # 가격 히스토리 업데이트 (최대 20개 유지)
@@ -4573,7 +4686,7 @@ def open_backtest_window(parent, total_investment_str, grid_count_str, period, a
     auto_grid_check.grid(row=2, column=2, padx=5, pady=2, sticky='w')
 
     ttk.Label(settings_frame, text="기간:").grid(row=3, column=0, padx=5, pady=2, sticky='w')
-    period_combo = ttk.Combobox(settings_frame, values=["1시간", "4시간", "1일", "7일"], state="readonly")
+    period_combo = ttk.Combobox(settings_frame, values=["30분", "1시간", "2시간", "4시간", "12시간"], state="readonly")
     period_combo.set(period)
     period_combo.grid(row=3, column=1, padx=5, pady=2, sticky='ew')
 
@@ -4830,8 +4943,8 @@ def start_dashboard():
     auto_grid_check.grid(row=3, column=0, columnspan=2, sticky='w', padx=3, pady=1)
 
     ttk.Label(settings_frame, text="가격 범위 기준:").grid(row=4, column=0, sticky='w', padx=3, pady=1)
-    period_combo = ttk.Combobox(settings_frame, values=["1시간", "4시간", "1일", "7일"], state="readonly")
-    period_combo.set(config.get("period", "4시간"))
+    period_combo = ttk.Combobox(settings_frame, values=["30분", "1시간", "2시간", "4시간", "12시간"], state="readonly")
+    period_combo.set(config.get("period", "1시간"))
     period_combo.grid(row=4, column=1, sticky='ew', padx=3)
 
     ttk.Label(settings_frame, text="목표 수익률 (%) (미지정 시 무한):").grid(row=5, column=0, sticky='w', padx=3, pady=1)
@@ -4912,13 +5025,17 @@ def start_dashboard():
             
             # 오더북 데이터가 있는 경우 추가 검사
             if orderbook:
-                if not orderbook.get('orderbook_units') or len(orderbook['orderbook_units']) == 0:
+                orderbook_units = orderbook.get('orderbook_units')
+                if not orderbook_units or not isinstance(orderbook_units, list) or len(orderbook_units) == 0:
                     return False, "오더북 데이터 없음"
                 
-                # 매수/매도 호가 존재 여부 확인
-                first_unit = orderbook['orderbook_units'][0]
-                if not first_unit.get('bid_price') or not first_unit.get('ask_price'):
-                    return False, "매수/매도 호가 데이터 오류"
+                # 매수/매도 호가 존재 여부 확인 (안전한 접근)
+                try:
+                    first_unit = orderbook_units[0]
+                    if not isinstance(first_unit, dict) or not first_unit.get('bid_price') or not first_unit.get('ask_price'):
+                        return False, "매수/매도 호가 데이터 오류"
+                except (IndexError, TypeError, KeyError):
+                    return False, "오더북 첫 번째 유닛 접근 오류"
                 
                 # 스프레드 이상치 검사 (현재가 대비 5% 이상 차이나면 오류로 간주)
                 bid_price = first_unit['bid_price']
