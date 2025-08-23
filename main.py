@@ -2627,36 +2627,88 @@ def evaluate_status(profit_percent, is_trading=False, panic_mode=False):
 
 # 가격 범위 계산 함수
 def calculate_price_range(ticker, period):
-    """선택한 기간에 따라 상한가/하한가를 계산"""
-    try:
-        # 숫자 형태의 일 수 처리
-        if isinstance(period, (int, float)):
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=int(period))
-        elif period == "1시간":
-            df = pyupbit.get_ohlcv(ticker, interval="minute60", count=1)
-        elif period == "4시간":
-            df = pyupbit.get_ohlcv(ticker, interval="minute60", count=4)
-        elif period == "1일":
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=1)
-        elif period == "7일":
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
-        else:
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=1)
-        
-        if df is None or df.empty:
-            return None, None
-        
-        high_price = df['high'].max()
-        low_price = df['low'].min()
-        
-        # 약간의 여유를 두어 범위 확장 (상한 +2%, 하한 -2%)
-        high_price = high_price * 1.02
-        low_price = low_price * 0.98
-        
-        return high_price, low_price
-    except Exception as e:
-        print(f"가격 범위 계산 오류: {e}")
-        return None, None
+    """선택한 기간에 따라 상한가/하한가를 계산 (개선된 버전)"""
+    print(f"🔍 가격 범위 계산 시작: {ticker}, 기간: {period}")
+    
+    # 최대 3번 재시도
+    for attempt in range(3):
+        try:
+            print(f"   시도 {attempt + 1}/3...")
+            
+            # 숫자 형태의 일 수 처리
+            if isinstance(period, (int, float)):
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=int(period))
+                print(f"   일 수 기반 데이터 요청: {int(period)}일")
+            elif period == "1시간":
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=1)
+                print(f"   1시간 데이터 요청")
+            elif period == "4시간":
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=4)
+                print(f"   4시간 데이터 요청")
+            elif period == "1일":
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=1)
+                print(f"   1일 데이터 요청")
+            elif period == "7일":
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
+                print(f"   7일 데이터 요청")
+            else:
+                # 기본값으로 7일 사용
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
+                print(f"   기본값 7일 데이터 요청 (입력값: {period})")
+            
+            if df is None:
+                print(f"   ❌ 데이터가 None입니다. (시도 {attempt + 1}/3)")
+                if attempt < 2:  # 마지막 시도가 아니면
+                    time.sleep(1)  # 1초 대기
+                    continue
+                else:
+                    return None, None
+                    
+            if df.empty:
+                print(f"   ❌ 데이터가 비어있습니다. (시도 {attempt + 1}/3)")
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+                else:
+                    return None, None
+            
+            print(f"   ✅ 데이터 수신 성공: {len(df)}개 행")
+            
+            high_price = df['high'].max()
+            low_price = df['low'].min()
+            
+            print(f"   원본 범위: {low_price:,.0f} ~ {high_price:,.0f}")
+            
+            # 유효성 검사
+            if high_price <= 0 or low_price <= 0 or high_price <= low_price:
+                print(f"   ❌ 잘못된 가격 범위: 상한={high_price}, 하한={low_price}")
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+                else:
+                    return None, None
+            
+            # 약간의 여유를 두어 범위 확장 (상한 +2%, 하한 -2%)
+            high_price = high_price * 1.02
+            low_price = low_price * 0.98
+            
+            print(f"   📊 최종 범위: {low_price:,.0f} ~ {high_price:,.0f} (±2% 여유)")
+            
+            return high_price, low_price
+            
+        except requests.exceptions.RequestException as e:
+            print(f"   🌐 네트워크 오류 (시도 {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(2)  # 네트워크 오류시 2초 대기
+                continue
+        except Exception as e:
+            print(f"   ❌ 가격 범위 계산 오류 (시도 {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(1)
+                continue
+    
+    print(f"   💥 모든 시도 실패")
+    return None, None
 
 def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, investment_amount=1000000, ticker=None):
     """코인별 최적화된 그리드 수 계산"""
@@ -3007,15 +3059,42 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     )
     
     if high_price is None or low_price is None:
-        log_and_update('오류', '가격 범위 계산 실패')
-        update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
+        error_msg = f'{get_korean_coin_name(ticker)} 가격 범위 계산 실패'
+        log_and_update('오류', error_msg)
+        update_gui('status', f"상태: 가격 조회 실패 ({ticker})", "Red.TLabel", False, False)
+        print(f"💥 {ticker} 거래 시작 실패: 가격 범위를 계산할 수 없습니다")
+        print(f"   - 네트워크 연결을 확인하세요")
+        print(f"   - Upbit API 상태를 확인하세요")
+        print(f"   - 잠시 후 다시 시도하세요")
         return
 
-    current_price = pyupbit.get_current_price(ticker)
+    print(f"🔍 {ticker} 현재 가격 조회 중...")
+    current_price = None
+    
+    # 현재 가격 조회 재시도 (최대 3번)
+    for attempt in range(3):
+        try:
+            current_price = pyupbit.get_current_price(ticker)
+            if current_price is not None:
+                print(f"   ✅ 현재 가격 조회 성공: {current_price:,.0f}원")
+                break
+            else:
+                print(f"   ❌ 현재 가격이 None (시도 {attempt + 1}/3)")
+                if attempt < 2:
+                    time.sleep(1)
+        except Exception as e:
+            print(f"   ❌ 현재 가격 조회 오류 (시도 {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(1)
+    
     if current_price is None:
-        log_and_update('오류', '시작 가격 조회 실패')
-        update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
+        error_msg = f'{get_korean_coin_name(ticker)} 현재 가격 조회 실패'
+        log_and_update('오류', error_msg)
+        update_gui('status', f"상태: 현재가 조회 실패 ({ticker})", "Red.TLabel", False, False)
         update_gui('action_status', 'error')
+        print(f"💥 {ticker} 거래 시작 실패: 현재 가격을 조회할 수 없습니다")
+        print(f"   - 해당 코인이 상장폐지되었는지 확인하세요")
+        print(f"   - Upbit 서버 상태를 확인하세요")
         return
     
     # API 데이터 유효성 초기 검사
@@ -3066,6 +3145,16 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
     log_and_update('시작', f"{actual_period} 범위: {low_price:,.0f}~{high_price:,.0f}")
     
+    # 거래 시작 성공 상태 표시
+    coin_name = get_korean_coin_name(ticker)
+    print(f"🎉 {coin_name} 거래 시작 성공!")
+    print(f"   - 가격 범위: {low_price:,.0f} ~ {high_price:,.0f}원")
+    print(f"   - 그리드 개수: {grid_count}개")
+    print(f"   - 투자 금액: {total_investment:,.0f}원")
+    print(f"   - 현재 가격: {current_price:,.0f}원")
+    
+    update_gui('status', f"상태: 거래 중 ({coin_name})", "Green.TLabel", False, False)
+    
     # GUI에 실제 사용된 기간 정보 전송
     update_gui('period_info', actual_period, high_price, low_price, grid_count)
     
@@ -3077,10 +3166,30 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     panic_mode = False
 
     # Calculate current total assets and cash balance on startup
-    current_price_for_calc = pyupbit.get_current_price(ticker)
+    print(f"🔍 {ticker} 자산 계산용 현재 가격 조회 중...")
+    current_price_for_calc = None
+    
+    # 자산 계산용 현재 가격 재시도
+    for attempt in range(3):
+        try:
+            current_price_for_calc = pyupbit.get_current_price(ticker)
+            if current_price_for_calc is not None:
+                print(f"   ✅ 자산 계산용 가격 조회 성공: {current_price_for_calc:,.0f}원")
+                break
+            else:
+                print(f"   ❌ 자산 계산용 가격이 None (시도 {attempt + 1}/3)")
+                if attempt < 2:
+                    time.sleep(1)
+        except Exception as e:
+            print(f"   ❌ 자산 계산용 가격 조회 오류 (시도 {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(1)
+    
     if current_price_for_calc is None:
-        log_and_update('오류', '현재 가격 조회 실패')
-        update_gui('status', "상태: 시작 실패", "Red.TLabel", False, False)
+        error_msg = f'{get_korean_coin_name(ticker)} 자산 계산 실패'
+        log_and_update('오류', error_msg)
+        update_gui('status', f"상태: 자산 계산 실패 ({ticker})", "Red.TLabel", False, False)
+        print(f"💥 {ticker} 거래 시작 실패: 자산 계산을 위한 현재 가격을 조회할 수 없습니다")
         return
 
     # 거래 재개 여부에 따른 데이터 로드
@@ -4912,11 +5021,13 @@ def start_dashboard():
             return False
 
     def toggle_trading():
-        """거래 시작/중지 로직 통합"""
+        """거래 시작/중지 로직 통합 (개선된 오류 처리)"""
         # 거래 중지 로직
         if active_trades:
+            print("🛑 거래 중지 중...")
             for ticker, stop_event in active_trades.items():
                 stop_event.set()
+                print(f"   - {get_korean_coin_name(ticker)} 거래 중지 신호 전송")
             active_trades.clear()  # active_trades 딕셔너리 클리어
             
             # 자동 최적화 스케줄러도 중지
@@ -4924,25 +5035,41 @@ def start_dashboard():
             print("🛑 자동 최적화 스케줄러 중지")
             
             toggle_button.config(text="거래 시작")
+            print("✅ 모든 거래가 중지되었습니다.")
             return
 
         # 거래 시작 로직
-        if not initialize_upbit() and not demo_var.get():
-            messagebox.showerror("오류", "업비트 API 키가 유효하지 않습니다.")
-            return
+        print("🚀 거래 시작 준비 중...")
+        
+        # API 초기화 확인
+        if not demo_var.get():
+            print("🔑 Upbit API 초기화 확인 중...")
+            if not initialize_upbit():
+                error_msg = "업비트 API 키가 유효하지 않습니다.\n\n해결 방법:\n1. 고급설정에서 API 키를 확인하세요\n2. 데모 모드로 테스트해보세요"
+                messagebox.showerror("API 오류", error_msg)
+                print("❌ API 초기화 실패")
+                return
+            print("✅ API 초기화 성공")
+        else:
+            print("🧪 데모 모드로 거래 시작")
 
         selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
         if not selected_tickers:
             messagebox.showwarning("경고", "거래할 코인을 선택해주세요.")
+            print("❌ 선택된 코인이 없습니다")
             return
+        
+        print(f"📊 선택된 코인: {', '.join([get_korean_coin_name(t) for t in selected_tickers])}")
 
         # 이전 거래 상태 로드 확인
         should_resume = load_previous_trading_state()
         
         # 거래 횟수를 거래 로그 기반으로 정확하게 초기화
+        print("📈 거래 통계 초기화 중...")
         initialize_trade_counts_from_logs()
 
         try:
+            print("⚙️ 설정 저장 중...")
             # 현재 UI 설정값을 config에 저장
             config["total_investment"] = amount_entry.get()
             config["grid_count"] = grid_entry.get()
@@ -5038,10 +5165,19 @@ def start_dashboard():
             return
 
         toggle_button.config(text="거래 정지")
+        print(f"🎯 {len(selected_tickers)}개 코인 거래 스레드 시작 중...")
+        
         for ticker in selected_tickers:
             if ticker not in active_trades:
+                coin_name = get_korean_coin_name(ticker)
+                print(f"   🚀 {coin_name} 거래 스레드 시작 중...")
+                
                 stop_event = threading.Event()
                 active_trades[ticker] = stop_event
+                
+                # 거래 시작 상태 표시
+                update_gui_args = ('status', f"상태: {coin_name} 시작 중...", "Blue.TLabel", False, False)
+                gui_queue.put((update_gui_args[0], ticker, update_gui_args[1:]))
                 
                 trade_thread = threading.Thread(
                     target=grid_trading,
@@ -5054,7 +5190,17 @@ def start_dashboard():
                     daemon=True
                 )
                 trade_thread.start()
-                status_labels[ticker].config(text="상태: 시작중...", style="Blue.TLabel")
+                print(f"   ✅ {coin_name} 거래 스레드 시작 완료")
+                
+                # 상태를 보다 구체적으로 업데이트
+                status_labels[ticker].config(text=f"상태: {coin_name} 준비 완료", style="Blue.TLabel")
+        
+        # 모든 거래 스레드 시작 완료
+        print(f"🎉 모든 거래 스레드 시작 완료! ({len(selected_tickers)}개 코인)")
+        print(f"   - 거래 모드: {'데모 모드' if demo_var.get() else '실제 거래'}")
+        print(f"   - 투자 금액: {total_investment:,.0f}원")
+        print(f"   - 그리드 개수: {grid_count}개")
+        print("   - 각 코인의 상세 정보는 위의 로그를 확인하세요.")
 
     # toggle_trading 함수 정의 후 버튼들 생성
     # 거래시작 버튼
