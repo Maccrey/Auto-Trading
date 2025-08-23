@@ -1,0 +1,17 @@
+{
+    "demo_KRW-BTC": [],
+    "demo_KRW-XRP": [],
+    "demo_KRW-ETH": [
+        {
+            "buy_price": 6537853.714285715,
+            "quantity": 0.0015287891771209494,
+            "target_sell_price": 6575518.857142857,
+            "actual_buy_price": 6537853.714285715,
+            "highest_price": 6537853.714285715,
+            "sell_held": false,
+            "highest_grid_reached": -1,
+            "technical_score": 0.04999999999999999,
+            "confidence": 9.615384615384613
+        }
+    ]
+}

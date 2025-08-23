@@ -3368,19 +3368,49 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     highest_value = current_total_assets  # 트레일링 스탑용 최고 자산 가치
     
     if not demo_mode:
+        print(f"💰 실거래 모드 - {get_korean_coin_name(ticker)} 계좌 정보 조회 중...")
         if upbit is None:
             log_and_update('오류', '업비트 API 초기화 안됨')
             update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
             return
-            
+        
+        # 현재 보유 현금 조회
         start_balance = upbit.get_balance("KRW")
         if start_balance is None:
             log_and_update('오류', '잔액 조회 실패')
             update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
             return
+        
+        # 현재 보유 코인 조회
+        current_coin_balance = upbit.get_balance(ticker)
+        if current_coin_balance is None:
+            current_coin_balance = 0.0
+            
+        print(f"   ✅ 현금 보유: {start_balance:,.0f}원")
+        print(f"   ✅ {get_korean_coin_name(ticker)} 보유: {current_coin_balance:.8f}개")
+        
+        # 기존 거래 상태 복원
         real_positions = load_trading_state(ticker, False)
         if real_positions:
+            print(f"   📊 기존 포지션 복원: {len(real_positions)}개")
             log_and_update('정보', f'{len(real_positions)}개의 포지션을 복원했습니다.')
+        else:
+            # 포지션이 없지만 코인을 보유하고 있다면 자동으로 포지션 생성
+            if current_coin_balance > 0.0001:  # 최소 보유량 체크
+                auto_position = {
+                    'quantity': current_coin_balance,
+                    'buy_price': current_price_for_calc,  # 현재가로 추정
+                    'actual_buy_price': current_price_for_calc,
+                    'target_sell_price': current_price_for_calc * 1.02,  # 2% 수익률 목표
+                    'highest_price': current_price_for_calc,
+                    'buy_grid_level': 0,
+                    'auto_created': True  # 자동 생성 포지션 표시
+                }
+                real_positions = [auto_position]
+                save_trading_state(ticker, real_positions, False)
+                print(f"   🔄 자동 포지션 생성: {current_coin_balance:.8f}개 (현재가 기준)")
+                log_and_update('자동생성', f'보유 코인 기반 포지션 자동 생성: {current_coin_balance:.8f}개')
+        
         total_invested = 0
     
     prev_price = current_price
@@ -3746,7 +3776,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 }
                                 log_trade(ticker, "데모 매수취소", log_msg, cancel_reason, cancel_details)
                             
-                            # 데모 모드에서는 매수 횟수를 증가시키지 않음 (실제 거래만 카운트)
+                            # 데모 모드에서도 매수 횟수 증가 (거래 통계용)
+                            trade_counts[ticker]["buy"] += 1
                             
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
@@ -3828,7 +3859,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     
-                    # 데모 모드에서는 매도 횟수를 증가시키지 않음 (실제 거래만 카운트)
+                    # 데모 모드에서도 매도 횟수 증가 (거래 통계용)
+                    trade_counts[ticker]["sell"] += 1
+                    if net_profit > 0:  # 수익이 난 거래만 카운트
+                        trade_counts[ticker]["profitable_sell"] += 1
                     
                     update_gui('refresh_chart')
                     continue # 다음 포지션으로
@@ -3931,7 +3965,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     }
                                     log_trade(ticker, "데모 매도취소", log_msg, sell_cancel_reason, sell_cancel_details)
                             
-                            # 데모 모드에서는 매도 횟수를 증가시키지 않음 (실제 거래만 카운트)
+                            # 데모 모드에서도 매도 횟수 증가 (거래 통계용)
+                            trade_counts[ticker]["sell"] += 1
+                            if net_profit > 0:  # 수익이 난 거래만 카운트
+                                trade_counts[ticker]["profitable_sell"] += 1
                             
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
@@ -4080,11 +4117,113 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             update_gui('chart_state', positions, grid_status)
             
         else:
-            # 실제 거래 모드 로직 - 데모와 동일한 로직 적용
-            # 실제 거래는 upbit API를 사용하여 실제 매매 주문 수행
-            # 데모와 동일한 매도 로직이지만 profits.json 저장도 포함
-            log_and_update('실제거래', '실제 거래 모드는 현재 개발 중입니다.')
-            # 실제 거래 모드에서도 profits.json에 수익 저장해야 함
+            # 실제 거래 모드 로직 - 데모와 동일한 로직이지만 실제 API 호출
+            log_and_update('실제거래', '실제 거래 모드로 동작합니다.')
+            
+            # 실제 거래 로직은 데모 모드와 동일하지만 실제 API 호출을 사용
+            # 현재 보유 현금 및 코인 조회
+            if upbit:
+                current_balance = upbit.get_balance("KRW")
+                current_coin_balance = upbit.get_balance(ticker)
+                print(f"💰 실거래 모드 - 현재 보유: 현금 {current_balance:,.0f}원, {get_korean_coin_name(ticker)} {current_coin_balance:.8f}개")
+            
+            # 실제 거래에서는 데모와 동일한 로직을 사용하되, 매매 시에만 실제 API를 호출
+            positions = demo_positions
+            
+            # 실거래 매수 로직
+            if not buy_pending and price <= grid_levels[lowest_grid_to_buy] * (1 + config.get('grid_confirmation_buffer', 0.1) / 100):
+                if demo_balance >= amount_per_grid:
+                    # 실제 매수 주문 실행
+                    try:
+                        buy_result = execute_buy_order(ticker, amount_per_grid, price)
+                        if buy_result and buy_result.get('uuid'):
+                            # 매수 성공 시 포지션 추가
+                            buy_price = grid_levels[lowest_grid_to_buy]
+                            quantity = (amount_per_grid * (1 - fee_rate)) / buy_price
+                            
+                            new_position = {
+                                'quantity': quantity,
+                                'buy_price': buy_price,
+                                'actual_buy_price': price,
+                                'target_sell_price': price * (1 + target_profit_percent / 100),
+                                'highest_price': price,
+                                'buy_grid_level': lowest_grid_to_buy,
+                                'order_uuid': buy_result.get('uuid')  # 실거래에서는 주문 ID 저장
+                            }
+                            demo_positions.append(new_position)
+                            save_trading_state(ticker, demo_positions, demo_mode)
+                            
+                            # 잔고 업데이트
+                            demo_balance -= amount_per_grid
+                            
+                            buy_reason = f"그리드 레벨 {lowest_grid_to_buy+1} 매수 신호"
+                            buy_details = {
+                                "grid_price": f"{buy_price:,.0f}원",
+                                "actual_price": f"{price:,.0f}원",
+                                "quantity": f"{quantity:.8f}개",
+                                "investment": f"{amount_per_grid:,.0f}원",
+                                "order_id": buy_result.get('uuid')
+                            }
+                            log_trade(ticker, "실거래 매수", f"{price:,.0f}원 ({quantity:.6f}개) 투자: {amount_per_grid:,.0f}원", buy_reason, buy_details)
+                            speak_async(f"실거래 매수 완료, {get_korean_coin_name(ticker)} {price:,.0f}원")
+                            
+                            print(f"🔥 실거래 매수 완료: {quantity:.8f}개 @ {price:,.0f}원")
+                        else:
+                            print(f"❌ 실거래 매수 실패: API 응답 오류")
+                            log_trade(ticker, "매수 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(buy_result)})
+                            
+                    except Exception as e:
+                        print(f"❌ 실거래 매수 오류: {e}")
+                        log_trade(ticker, "매수 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e)})
+            
+            # 실거래 매도 로직
+            for position in demo_positions[:]:
+                if price >= position['target_sell_price']:
+                    try:
+                        sell_result = execute_sell_order(ticker, position['quantity'], price)
+                        if sell_result and sell_result.get('uuid'):
+                            # 매도 성공 시 포지션 제거 및 수익 계산
+                            sell_amount = position['quantity'] * price * (1 - fee_rate)
+                            buy_cost = position['quantity'] * position['actual_buy_price']
+                            net_profit = sell_amount - buy_cost
+                            
+                            demo_positions.remove(position)
+                            save_trading_state(ticker, demo_positions, demo_mode)
+                            
+                            demo_balance += sell_amount
+                            total_realized_profit += net_profit
+                            
+                            # profits.json에 수익 저장
+                            profits_data = load_profits_data()
+                            current_profit = profits_data.get(ticker, 0)
+                            profits_data[ticker] = current_profit + net_profit
+                            save_profits_data(profits_data)
+                            
+                            sell_reason = f"목표 수익률 달성"
+                            sell_details = {
+                                "sell_price": f"{price:,.0f}원",
+                                "quantity": f"{position['quantity']:.8f}개",
+                                "profit": f"{net_profit:,.0f}원",
+                                "profit_rate": f"{(net_profit/buy_cost*100):+.2f}%",
+                                "order_id": sell_result.get('uuid')
+                            }
+                            log_trade(ticker, "실거래 매도", f"{price:,.0f}원 ({position['quantity']:.6f}개) 수익: {net_profit:,.0f}원", sell_reason, sell_details)
+                            speak_async(f"실거래 매도 완료, {get_korean_coin_name(ticker)} 수익 {net_profit:,.0f}원")
+                            
+                            print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
+                            
+                            # 매도 횟수 증가
+                            trade_counts[ticker]["sell"] += 1
+                            if net_profit > 0:
+                                trade_counts[ticker]["profitable_sell"] += 1
+                                
+                        else:
+                            print(f"❌ 실거래 매도 실패: API 응답 오류")
+                            log_trade(ticker, "매도 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(sell_result)})
+                            
+                    except Exception as e:
+                        print(f"❌ 실거래 매도 오류: {e}")
+                        log_trade(ticker, "매도 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e)})
 
 
         
@@ -4845,10 +4984,27 @@ def start_dashboard():
     # 버튼 스타일 정의
     button_style = ttk.Style()
     button_style.configure('Small.TButton', font=('Helvetica', 9), padding=(2, 0))
+    button_style.configure('Small.TRadiobutton', font=('Helvetica', 8))  # 거래 모드 선택 글씨 크기 30% 축소
 
+    # 거래 모드 선택 (라디오 버튼)
+    trade_mode_frame = ttk.LabelFrame(settings_frame, text="📊 거래 모드 선택")
+    trade_mode_frame.grid(row=8, column=0, columnspan=2, sticky='ew', padx=3, pady=3)
+    
     demo_var = tk.IntVar(value=config.get("demo_mode", 1))
-    demo_check = ttk.Checkbutton(settings_frame, text="데모 모드", variable=demo_var)
-    demo_check.grid(row=8, column=0, columnspan=2, sticky='w', padx=3, pady=3)
+    
+    demo_radio = ttk.Radiobutton(trade_mode_frame, text="🧪 데모 모드 (가상 거래)", 
+                                variable=demo_var, value=1, style='Small.TRadiobutton')
+    demo_radio.grid(row=0, column=0, sticky='w', padx=5, pady=2)
+    
+    real_radio = ttk.Radiobutton(trade_mode_frame, text="💰 실거래 모드 (실제 거래)", 
+                                variable=demo_var, value=0, style='Small.TRadiobutton')
+    real_radio.grid(row=0, column=1, sticky='w', padx=5, pady=2)
+    
+    # 거래 모드 설명 라벨
+    mode_info_label = ttk.Label(trade_mode_frame, 
+                               text="데모: 안전한 테스트 | 실거래: API 키 필요",
+                               font=('Helvetica', 8), foreground='gray')
+    mode_info_label.grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=(0, 5))
     
     # 초기 자동거래 상태 설정
     update_auto_status()
@@ -5958,7 +6114,7 @@ def start_dashboard():
                     
                     # 텍스트가 너무 길면 축약
                     display_text = f"{icon} {market_status}: {market_details}"
-                    if len(display_text) > 35:
+                    if len(display_text) > 60:
                         display_text = f"{icon} {market_status}: {market_details[:25]}..."
                     market_status_labels[ticker].config(text=display_text, style=style)
                 elif key == 'details':
