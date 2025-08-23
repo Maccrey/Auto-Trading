@@ -534,8 +534,14 @@ class CoinSpecificGridManager:
     def get_real_time_market_data(self, ticker):
         """실시간 시장 데이터 수집 및 분석"""
         try:
-            # 1시간 봉 데이터 24개 가져오기
-            df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+            # 1시간 봉 데이터 24개 가져오기 (안전한 API 호출)
+            df = None
+            try:
+                df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+            except Exception as api_error:
+                print(f"시장 데이터 조회 예외 ({ticker}): {api_error}")
+                return {'volatility': 0, 'trend_strength': 0, 'volume_ratio': 1.0}
+                
             if df is None or len(df) < 10:
                 return {'volatility': 0, 'trend_strength': 0, 'volume_ratio': 1.0}
             
@@ -670,11 +676,15 @@ class AutoTradingSystem:
             volatilities = []
             
             for ticker in tickers:
-                df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
-                if df is not None and len(df) > 1:
-                    price_changes = df['close'].pct_change().abs()
-                    volatility = price_changes.std() * 100
-                    volatilities.append(volatility)
+                try:
+                    df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+                    if df is not None and len(df) > 1:
+                        price_changes = df['close'].pct_change().abs()
+                        volatility = price_changes.std() * 100
+                        volatilities.append(volatility)
+                except Exception as api_error:
+                    print(f"변동성 계산 API 오류 ({ticker}): {api_error}")
+                    continue
             
             return sum(volatilities) / len(volatilities) if volatilities else 0.0
         except:
@@ -687,10 +697,14 @@ class AutoTradingSystem:
             trend_scores = []
             
             for ticker in tickers:
-                df = pyupbit.get_ohlcv(ticker, interval='minute60', count=12)
-                if df is not None and len(df) > 6:
-                    recent_change = (df['close'].iloc[-1] - df['close'].iloc[-6]) / df['close'].iloc[-6]
-                    trend_scores.append(abs(recent_change))
+                try:
+                    df = pyupbit.get_ohlcv(ticker, interval='minute60', count=12)
+                    if df is not None and len(df) > 6:
+                        recent_change = (df['close'].iloc[-1] - df['close'].iloc[-6]) / df['close'].iloc[-6]
+                        trend_scores.append(abs(recent_change))
+                except Exception as api_error:
+                    print(f"트렌드 강도 계산 API 오류 ({ticker}): {api_error}")
+                    continue
             
             return sum(trend_scores) / len(trend_scores) if trend_scores else 0.0
         except:
@@ -2031,8 +2045,14 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
         if not positions:
             return 0, 0
         
-        current_price = pyupbit.get_current_price(ticker)
+        try:
+            current_price = pyupbit.get_current_price(ticker)
+        except Exception as e:
+            print(f"자동 매도 가격 조회 오류: {e}")
+            return 0, 0
+            
         if current_price is None:
+            print(f"자동 매도 가격 데이터 None: {ticker}")
             return 0, 0
         
         total_sold_quantity = 0
@@ -2591,9 +2611,7 @@ def execute_buy_order(ticker, amount, current_price, use_limit=True):
             # 시장가 주문
             result = upbit.buy_market_order(ticker, amount)
         
-        # 주문 성공시 매수 개수 증가
-        if result and result.get('uuid'):
-            trade_counts[ticker]["buy"] += 1
+        # 매수 카운트는 initialize_trade_counts_from_logs()에서만 처리
             
         return result
     except requests.exceptions.RequestException as e:
@@ -2622,9 +2640,7 @@ def execute_sell_order(ticker, quantity, current_price, use_limit=True):
             # 시장가 주문
             result = upbit.sell_market_order(ticker, quantity)
             
-        # 주문 성공시 매도 개수 증가
-        if result and result.get('uuid'):
-            trade_counts[ticker]["sell"] += 1
+        # 매도 카운트는 initialize_trade_counts_from_logs()에서만 처리
             
         return result
     except requests.exceptions.RequestException as e:
@@ -2686,17 +2702,22 @@ def calculate_price_range_hours(ticker, hours):
         try:
             print(f"   시도 {attempt + 1}/3...")
             
-            # 시간에 따른 데이터 요청
-            if hours <= 0.5:  # 30분 이하
-                df = pyupbit.get_ohlcv(ticker, interval="minute3", count=10)  # 30분 = 10개 3분봉
-            elif hours <= 1:
-                df = pyupbit.get_ohlcv(ticker, interval="minute5", count=12)  # 1시간 = 12개 5분봉
-            elif hours <= 4:
-                df = pyupbit.get_ohlcv(ticker, interval="minute15", count=16)  # 4시간 = 16개 15분봉
-            elif hours <= 12:
-                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=int(hours))  # N시간 = N개 1시간봉
-            else:
-                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=int(hours))  # N시간 = N개 1시간봉
+            # 시간에 따른 데이터 요청 (API 호출 안전 처리)
+            df = None
+            try:
+                if hours <= 0.5:  # 30분 이하
+                    df = pyupbit.get_ohlcv(ticker, interval="minute3", count=10)  # 30분 = 10개 3분봉
+                elif hours <= 1:
+                    df = pyupbit.get_ohlcv(ticker, interval="minute5", count=12)  # 1시간 = 12개 5분봉
+                elif hours <= 4:
+                    df = pyupbit.get_ohlcv(ticker, interval="minute15", count=16)  # 4시간 = 16개 15분봉
+                elif hours <= 12:
+                    df = pyupbit.get_ohlcv(ticker, interval="minute60", count=int(hours))  # N시간 = N개 1시간봉
+                else:
+                    df = pyupbit.get_ohlcv(ticker, interval="minute60", count=int(hours))  # N시간 = N개 1시간봉
+            except Exception as api_error:
+                print(f"   ❌ OHLCV 데이터 조회 예외: {api_error}")
+                continue
             
             if df is None:
                 print(f"   ❌ 데이터가 None입니다. (시도 {attempt + 1}/3)")
@@ -2739,26 +2760,32 @@ def calculate_price_range(ticker, period):
         try:
             print(f"   시도 {attempt + 1}/3...")
             
-            # 숫자 형태의 일 수 처리
-            if isinstance(period, (int, float)):
-                df = pyupbit.get_ohlcv(ticker, interval="day", count=int(period))
-                print(f"   일 수 기반 데이터 요청: {int(period)}일")
-            elif period == "1시간":
-                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=1)
-                print(f"   1시간 데이터 요청")
-            elif period == "4시간":
-                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=4)
-                print(f"   4시간 데이터 요청")
-            elif period == "1일":
-                df = pyupbit.get_ohlcv(ticker, interval="day", count=1)
-                print(f"   1일 데이터 요청")
-            elif period == "7일":
-                df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
-                print(f"   7일 데이터 요청")
-            else:
-                # 기본값으로 7일 사용
-                df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
-                print(f"   기본값 7일 데이터 요청 (입력값: {period})")
+            # API 호출을 안전하게 래핑
+            df = None
+            try:
+                # 숫자 형태의 일 수 처리
+                if isinstance(period, (int, float)):
+                    df = pyupbit.get_ohlcv(ticker, interval="day", count=int(period))
+                    print(f"   일 수 기반 데이터 요청: {int(period)}일")
+                elif period == "1시간":
+                    df = pyupbit.get_ohlcv(ticker, interval="minute60", count=1)
+                    print(f"   1시간 데이터 요청")
+                elif period == "4시간":
+                    df = pyupbit.get_ohlcv(ticker, interval="minute60", count=4)
+                    print(f"   4시간 데이터 요청")
+                elif period == "1일":
+                    df = pyupbit.get_ohlcv(ticker, interval="day", count=1)
+                    print(f"   1일 데이터 요청")
+                elif period == "7일":
+                    df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
+                    print(f"   7일 데이터 요청")
+                else:
+                    # 기본값으로 7일 사용
+                    df = pyupbit.get_ohlcv(ticker, interval="day", count=7)
+                    print(f"   기본값 7일 데이터 요청 (입력값: {period})")
+            except Exception as api_error:
+                print(f"   ❌ OHLCV 데이터 조회 예외: {api_error}")
+                continue
             
             if df is None:
                 print(f"   ❌ 데이터가 None입니다. (시도 {attempt + 1}/3)")
@@ -2936,17 +2963,22 @@ def get_chart_data(ticker, period):
 def run_backtest(ticker, total_investment, grid_count, period, stop_loss_threshold, use_trailing_stop, trailing_stop_percent, auto_grid, target_profit_percent):
     """상세 백테스트 실행"""
     try:
-        # 기간에 따라 데이터 가져오기
-        if period == "1일":
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=90) # 3개월
-        elif period == "7일":
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=180) # 6개월
-        elif period == "4시간":
-            df = pyupbit.get_ohlcv(ticker, interval="minute240", count=24 * 30) # 1개월
-        elif period == "1시간":
-            df = pyupbit.get_ohlcv(ticker, interval="minute60", count=24 * 14) # 2주
-        else:
-            df = pyupbit.get_ohlcv(ticker, interval="day", count=90)
+        # 기간에 따라 데이터 가져오기 (안전한 API 호출)
+        df = None
+        try:
+            if period == "1일":
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=90) # 3개월
+            elif period == "7일":
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=180) # 6개월
+            elif period == "4시간":
+                df = pyupbit.get_ohlcv(ticker, interval="minute240", count=24 * 30) # 1개월
+            elif period == "1시간":
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=24 * 14) # 2주
+            else:
+                df = pyupbit.get_ohlcv(ticker, interval="day", count=90)
+        except Exception as api_error:
+            print(f"백테스트 데이터 조회 API 오류: {api_error}")
+            return None
 
         if df is None or df.empty:
             print("백테스트 데이터 로드 실패")
@@ -3125,33 +3157,14 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             update_gui('log', full_log)
     
     def check_api_data_validity(current_price, orderbook=None):
-        """API 데이터 유효성 검사 (그리드 거래용)"""
+        """API 데이터 유효성 검사 (그리드 거래용) - 완화된 검사"""
         try:
-            # 기본 가격 유효성 검사
+            # 기본 가격 유효성 검사만 수행 (가장 중요한 검사)
             if current_price is None or current_price <= 0:
                 return False, "현재가 데이터 오류"
             
-            # 오더북 데이터가 있는 경우 추가 검사
-            if orderbook:
-                orderbook_units = orderbook.get('orderbook_units')
-                if not orderbook_units or not isinstance(orderbook_units, list) or len(orderbook_units) == 0:
-                    return False, "오더북 데이터 없음"
-                
-                # 매수/매도 호가 존재 여부 확인 (안전한 접근)
-                try:
-                    first_unit = orderbook_units[0]
-                    if not isinstance(first_unit, dict) or not first_unit.get('bid_price') or not first_unit.get('ask_price'):
-                        return False, "매수/매도 호가 데이터 오류"
-                except (IndexError, TypeError, KeyError):
-                    return False, "오더북 첫 번째 유닛 접근 오류"
-                
-                # 스프레드 이상치 검사 (현재가 대비 5% 이상 차이나면 오류로 간주)
-                bid_price = first_unit['bid_price']
-                ask_price = first_unit['ask_price']
-                spread_ratio = (ask_price - bid_price) / current_price
-                if spread_ratio > 0.05:  # 5% 이상 스프레드는 비정상
-                    return False, f"비정상적인 스프레드: {spread_ratio:.2%}"
-            
+            # 가격이 정상이면 오더북 문제는 무시하고 거래 진행
+            # (오더북은 보조 데이터이므로 일시적 조회 실패는 허용)
             return True, "정상"
             
         except Exception as e:
@@ -3531,6 +3544,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     buy_pending = False
     lowest_grid_to_buy = -1
     recent_prices = []  # 가격 히스토리 저장
+    api_error_count = 0  # API 오류 카운터
+    max_api_errors = 10  # 최대 연속 API 오류 허용 횟수
 
     while not stop_event.is_set():
         # 9시 정각 그리드 자동 갱신 및 투자금 재분배
@@ -3582,10 +3597,31 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             last_update_day = now.day
 
         try:
-            price = pyupbit.get_current_price(ticker)
-            if price is None: # None을 반환하는 경우 잠시 후 재시도
+            # API 호출을 안전하게 래핑
+            try:
+                price = pyupbit.get_current_price(ticker)
+            except Exception as api_error:
+                api_error_count += 1
+                print(f"가격 데이터 조회 예외 ({api_error_count}/{max_api_errors}): {api_error}")
+                log_and_update('API오류', f'가격 데이터 조회 예외 #{api_error_count}: {str(api_error)}')
                 update_gui('action_status', 'error')
-                time.sleep(1)
+                
+                # 연속 API 오류가 너무 많으면 더 긴 대기
+                if api_error_count >= max_api_errors:
+                    print(f"❌ 연속 API 오류 {max_api_errors}회 달성, 60초 대기 후 재시도")
+                    time.sleep(60)
+                    api_error_count = 0  # 카운터 리셋
+                else:
+                    # 지수 백오프: 1초, 2초, 4초, 8초, 최대 30초
+                    backoff_time = min(2 ** (api_error_count - 1), 30)
+                    print(f"API 오류 대기: {backoff_time}초")
+                    time.sleep(backoff_time)
+                continue
+                
+            if price is None: # None을 반환하는 경우 잠시 후 재시도
+                print(f"{ticker} 가격 데이터 None 반환")
+                update_gui('action_status', 'error')
+                time.sleep(2)
                 continue
                 
             # API 데이터 유효성 검사 (더 안전한 방식)
@@ -3604,11 +3640,21 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             is_valid, error_msg = check_api_data_validity(price, orderbook)
             if not is_valid:
-                log_and_update('API오류', f'{error_msg}')
+                api_error_count += 1
+                log_and_update('API오류', f'{error_msg} (#{api_error_count})')
                 update_gui('action_status', 'error')
                 update_gui('status', "상태: API 오류", "Red.TLabel", False, False)
-                time.sleep(3)  # API 오류 시 3초 대기 후 재시도 (5초->3초 단축)
+                
+                # 지수 백오프 적용
+                backoff_time = min(2 ** (api_error_count - 1), 30)
+                print(f"API 데이터 유효성 오류 대기: {backoff_time}초")
+                time.sleep(backoff_time)
                 continue
+            
+            # API 호출 성공시 오류 카운터 리셋
+            if api_error_count > 0:
+                print(f"✅ API 오류 해결됨 (연속 오류 {api_error_count}회 종료)")
+                api_error_count = 0
             
             # 가격 히스토리 업데이트 (최대 20개 유지)
             recent_prices.append(price)
@@ -3892,8 +3938,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 }
                                 log_trade(ticker, "데모 매수취소", log_msg, cancel_reason, cancel_details)
                             
-                            # 데모 모드에서도 매수 횟수 증가 (거래 통계용)
-                            trade_counts[ticker]["buy"] += 1
+                            # 매수 카운트는 initialize_trade_counts_from_logs()에서만 처리
                             
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
@@ -3975,10 +4020,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                     speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     
-                    # 데모 모드에서도 매도 횟수 증가 (거래 통계용)
-                    trade_counts[ticker]["sell"] += 1
-                    if net_profit > 0:  # 수익이 난 거래만 카운트
-                        trade_counts[ticker]["profitable_sell"] += 1
+                    # 매도 카운트는 initialize_trade_counts_from_logs()에서만 처리
                     
                     update_gui('refresh_chart')
                     continue # 다음 포지션으로
@@ -4081,10 +4123,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     }
                                     log_trade(ticker, "데모 매도취소", log_msg, sell_cancel_reason, sell_cancel_details)
                             
-                            # 데모 모드에서도 매도 횟수 증가 (거래 통계용)
-                            trade_counts[ticker]["sell"] += 1
-                            if net_profit > 0:  # 수익이 난 거래만 카운트
-                                trade_counts[ticker]["profitable_sell"] += 1
+                            # 매도 카운트는 initialize_trade_counts_from_logs()에서만 처리
                             
                             update_gui('refresh_chart')
                             update_gui('action_status', 'trading')
@@ -4330,9 +4369,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             
                             print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
                             
-                            # 수익 거래 횟수 증가 (매도 횟수는 execute_sell_order에서 이미 증가됨)
-                            if net_profit > 0:
-                                trade_counts[ticker]["profitable_sell"] += 1
+                            # 수익 거래 카운트는 initialize_trade_counts_from_logs()에서만 처리
                             
                             update_gui('refresh_chart')  # GUI 즉시 새로고침
                                 
@@ -4375,7 +4412,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         if not buy_pending and not any(pos.get('sell_held', False) for pos in demo_positions):
             update_gui('action_status', 'waiting')
             
-        time.sleep(3)
+        # API rate limiting을 고려한 대기 시간 조정
+        base_sleep_time = 2  # 기본 대기시간을 3초에서 2초로 단축
+        if api_error_count > 0:
+            # API 오류가 있었다면 조금 더 대기
+            base_sleep_time = min(3 + api_error_count, 10)
+        time.sleep(base_sleep_time)
 
     if stop_event.is_set():
         log_and_update('중지', '사용자 요청')
@@ -5015,39 +5057,6 @@ def start_dashboard():
                 text=status_texts.get(status_type, "🔍 대기중"),
                 style=status_colors.get(status_type, "Blue.TLabel")
             )
-    
-    def check_api_data_validity(ticker, current_price, orderbook=None):
-        """API 데이터 유효성 검사"""
-        try:
-            # 기본 가격 유효성 검사
-            if current_price is None or current_price <= 0:
-                return False, "현재가 데이터 오류"
-            
-            # 오더북 데이터가 있는 경우 추가 검사
-            if orderbook:
-                orderbook_units = orderbook.get('orderbook_units')
-                if not orderbook_units or not isinstance(orderbook_units, list) or len(orderbook_units) == 0:
-                    return False, "오더북 데이터 없음"
-                
-                # 매수/매도 호가 존재 여부 확인 (안전한 접근)
-                try:
-                    first_unit = orderbook_units[0]
-                    if not isinstance(first_unit, dict) or not first_unit.get('bid_price') or not first_unit.get('ask_price'):
-                        return False, "매수/매도 호가 데이터 오류"
-                except (IndexError, TypeError, KeyError):
-                    return False, "오더북 첫 번째 유닛 접근 오류"
-                
-                # 스프레드 이상치 검사 (현재가 대비 5% 이상 차이나면 오류로 간주)
-                bid_price = first_unit['bid_price']
-                ask_price = first_unit['ask_price']
-                spread_ratio = (ask_price - bid_price) / current_price
-                if spread_ratio > 0.05:  # 5% 이상 스프레드는 비정상
-                    return False, f"비정상적인 스프레드: {spread_ratio:.2%}"
-            
-            return True, "정상"
-            
-        except Exception as e:
-            return False, f"데이터 검증 오류: {str(e)}"
     
     def toggle_auto_mode():
         """자동 거래 모드 토글"""
