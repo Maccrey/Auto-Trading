@@ -28,6 +28,11 @@ try:
     tts_queue = Queue()
     tts_lock = threading.Lock()
     tts_worker_thread = None
+    
+    # TTS 경고 중복 방지를 위한 변수
+    last_alert_time = {}  # 각 코인별 마지막 경고 시간
+    alert_cooldown = 60   # 경고 쿨다운 시간 (초)
+    
 except Exception as e:
     print(f"TTS 엔진 초기화 오류: {e}")
     tts_engine = None
@@ -56,10 +61,83 @@ def get_korean_coin_name(ticker):
     }
     return coin_names.get(ticker, ticker.replace('KRW-', ''))
 
-def speak_async(text):
+def analyze_market_condition(ticker, current_price, recent_prices, high_price, low_price):
+    """시장 상태 분석 함수"""
+    try:
+        if len(recent_prices) < 10:
+            return "데이터 부족", "분석 불가"
+        
+        # 최근 가격 변화율 계산
+        price_1min_ago = recent_prices[-2] if len(recent_prices) >= 2 else current_price
+        price_5min_ago = recent_prices[-6] if len(recent_prices) >= 6 else current_price
+        price_10min_ago = recent_prices[-11] if len(recent_prices) >= 11 else current_price
+        
+        change_1min = ((current_price - price_1min_ago) / price_1min_ago) * 100
+        change_5min = ((current_price - price_5min_ago) / price_5min_ago) * 100
+        change_10min = ((current_price - price_10min_ago) / price_10min_ago) * 100
+        
+        # 박스권 계산 (최고가와 최저가 사이의 구간)
+        box_range = f"{low_price:,.0f}원~{high_price:,.0f}원"
+        price_position = (current_price - low_price) / (high_price - low_price) if high_price > low_price else 0.5
+        
+        # 상태 결정
+        status = ""
+        details = ""
+        
+        # 급등/급락 기준: 1분 3% 이상 또는 5분 7% 이상 또는 10분 10% 이상
+        if change_1min >= 3.0 or change_5min >= 7.0 or change_10min >= 10.0:
+            status = "급등"
+            if change_1min >= 5.0:
+                details = f"초급등 {change_1min:+.1f}% (1분)"
+            elif change_5min >= 10.0:
+                details = f"강급등 {change_5min:+.1f}% (5분)"
+            else:
+                details = f"급등 {change_10min:+.1f}% (10분)"
+                
+        elif change_1min <= -3.0 or change_5min <= -7.0 or change_10min <= -10.0:
+            status = "급락"
+            if change_1min <= -5.0:
+                details = f"초급락 {change_1min:+.1f}% (1분)"
+            elif change_5min <= -10.0:
+                details = f"강급락 {change_5min:+.1f}% (5분)"
+            else:
+                details = f"급락 {change_10min:+.1f}% (10분)"
+                
+        elif price_position >= 0.8:
+            status = "고점권"
+            details = f"상단 {price_position*100:.0f}% ({box_range})"
+            
+        elif price_position <= 0.2:
+            status = "저점권"
+            details = f"하단 {price_position*100:.0f}% ({box_range})"
+            
+        elif 0.3 <= price_position <= 0.7:
+            status = "박스권"
+            details = f"중간 {price_position*100:.0f}% ({box_range})"
+            
+        elif change_5min > 2.0:
+            status = "상승"
+            details = f"상승세 {change_5min:+.1f}% (5분)"
+            
+        elif change_5min < -2.0:
+            status = "하락"
+            details = f"하락세 {change_5min:+.1f}% (5분)"
+            
+        else:
+            status = "보합"
+            details = f"횡보 {change_5min:+.1f}% ({box_range})"
+            
+        return status, details
+        
+    except Exception as e:
+        print(f"시장 상태 분석 오류: {e}")
+        return "오류", "분석 실패"
+
+def speak_async(text, repeat=1):
     """TTS 큐에 메시지를 추가 (논블로킹)"""
     if tts_engine and config.get('tts_enabled', True):
-        tts_queue.put(text)
+        for _ in range(repeat):
+            tts_queue.put(text)
 
 def start_tts_worker():
     """TTS 작업자 스레드 시작"""
@@ -3593,7 +3671,28 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             # 평가수익과 평가수익률 계산
             unrealized_profit_percent = (unrealized_profit / total_investment) * 100 if total_investment > 0 else 0
             
+            # 시장 상태 분석
+            market_status, market_details = analyze_market_condition(ticker, price, recent_prices, high_price, low_price)
+            
+            # 급등/급락 시 경고 메시지 (중복 방지)
+            if market_status in ["급등", "급락"]:
+                current_time = time.time()
+                last_time = last_alert_time.get(ticker, 0)
+                
+                # 쿨다운 시간이 지났거나, 처음 경고인 경우
+                if current_time - last_time > alert_cooldown:
+                    korean_name = get_korean_coin_name(ticker)
+                    if "초급등" in market_details or "초급락" in market_details:
+                        speak_async(f"긴급! {korean_name} {market_details}!", repeat=5)
+                    elif "강급등" in market_details or "강급락" in market_details:
+                        speak_async(f"주의! {korean_name} {market_details}!", repeat=3)
+                    else:
+                        speak_async(f"알림! {korean_name} {market_details}!", repeat=2)
+                    
+                    last_alert_time[ticker] = current_time
+            
             update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, current_realized_profit, realized_profit_percent, unrealized_profit, unrealized_profit_percent)
+            update_gui('market_status', market_status, market_details)
 
             # 고급 그리드 차트 상태 업데이트
             positions = demo_positions
@@ -4107,6 +4206,7 @@ def start_dashboard():
     ticker_vars = {}
     status_labels, current_price_labels, running_time_labels = {}, {}, {}
     action_status_labels = {}  # 행동 상태 라벨
+    market_status_labels = {}  # 시장 상태 라벨
     detail_labels = {}
     
     tickers = ("KRW-BTC", "KRW-ETH", "KRW-XRP")
@@ -4130,6 +4230,10 @@ def start_dashboard():
         # 행동 상태 (새로 추가)
         action_status_labels[ticker] = ttk.Label(ticker_frame, text="🔍 대기중", style="Blue.TLabel", font=('Helvetica', 9, 'bold'))
         action_status_labels[ticker].grid(row=i*6+1, column=1, columnspan=2, sticky='w', padx=3)
+        
+        # 시장 상태 (새로 추가)
+        market_status_labels[ticker] = ttk.Label(ticker_frame, text="📊 분석중", style="Gray.TLabel", font=('Helvetica', 8))
+        market_status_labels[ticker].grid(row=i*6+1, column=3, columnspan=2, sticky='w', padx=3)
         
         # 상세 정보
         detail_labels[ticker] = {
@@ -4791,6 +4895,9 @@ def start_dashboard():
             detail_labels[ticker]['sell_count'].config(text="📉 매도: 0회", style="Gray.TLabel")
             detail_labels[ticker]['profitable_sell_count'].config(text="💰 수익거래: 0회", style="Gray.TLabel")
             
+            # 시장 상태 라벨 초기화
+            market_status_labels[ticker].config(text="📊 분석중", style="Gray.TLabel")
+            
             # 매수/매도 개수 초기화
             trade_counts[ticker]["buy"] = 0
             trade_counts[ticker]["sell"] = 0
@@ -5276,6 +5383,39 @@ def start_dashboard():
                     current_price_labels[ticker].config(text=args[0], style=args[1])
                 elif key == 'running_time':
                     running_time_labels[ticker].config(text=args[0], style="Blue.TLabel")
+                elif key == 'market_status':
+                    market_status, market_details = args
+                    # 상태에 따른 색상 결정
+                    if market_status == "급등":
+                        style = "Red.TLabel" if "초급등" in market_details else "Orange.TLabel"
+                        icon = "🚀" if "초급등" in market_details else "📈"
+                    elif market_status == "급락":
+                        style = "Blue.TLabel" if "초급락" in market_details else "Purple.TLabel" 
+                        icon = "💥" if "초급락" in market_details else "📉"
+                    elif market_status == "고점권":
+                        style = "Red.TLabel"
+                        icon = "🔺"
+                    elif market_status == "저점권":
+                        style = "Blue.TLabel"
+                        icon = "🔻"
+                    elif market_status == "박스권":
+                        style = "Gray.TLabel"
+                        icon = "📊"
+                    elif market_status == "상승":
+                        style = "Green.TLabel"
+                        icon = "⬆️"
+                    elif market_status == "하락":
+                        style = "Red.TLabel"
+                        icon = "⬇️"
+                    else:
+                        style = "Gray.TLabel"
+                        icon = "➡️"
+                    
+                    # 텍스트가 너무 길면 축약
+                    display_text = f"{icon} {market_status}: {market_details}"
+                    if len(display_text) > 35:
+                        display_text = f"{icon} {market_status}: {market_details[:25]}..."
+                    market_status_labels[ticker].config(text=display_text, style=style)
                 elif key == 'details':
                     if len(args) == 10:
                         cash, coin_qty, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent, unrealized_profit, unrealized_profit_percent = args
