@@ -2799,9 +2799,16 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
         invested_in_held_positions = sum(pos['quantity'] * pos['buy_price'] for pos in demo_positions)
         
-        # 업데이트된 투자금 기준으로 자산 계산
+        # 업데이트된 투자금 기준으로 자산 계산 (실현수익 포함)
         initial_capital = float(total_investment)
+        
+        # 실현수익 조회
+        total_realized_profit = calculate_total_realized_profit()
+        
+        # 현금 잔고 = 총 투자금 - 현재 보유 포지션에 투입된 금액
         current_cash_balance = initial_capital - invested_in_held_positions
+        
+        # 총자산 = 현금 잔고 + 현재 코인 가치 (실현수익은 이미 총 투자금에 반영됨)
         current_total_assets = current_cash_balance + current_held_assets_value
         
         # 그리드 계산 재수행 (현재 보유 포지션 고려)
@@ -2828,8 +2835,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         log_and_update('설정재조정', f"그리드 간격: {price_gap:,.0f}원, 격당투자: {amount_per_grid:,.0f}원")
         
         if demo_mode:
-            start_balance = current_total_assets
-            demo_balance = current_total_assets
+            # 시작 잔고는 실현수익을 제외한 순수 초기 투자금으로 설정
+            start_balance = initial_capital
+            # 데모 잔고는 현재 현금 잔고로 설정 (실현수익이 반영된 투자금에서 보유 포지션 차감)
+            demo_balance = current_cash_balance
             if demo_positions:
                 log_and_update('정보', f'거래 재개: {len(demo_positions)}개의 포지션 유지')
             else:
@@ -2893,8 +2902,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         log_and_update('설정', f"그리드 간격: {price_gap:,.0f}원, 격당투자: {amount_per_grid:,.0f}원")
         
         if demo_mode:
-            start_balance = current_total_assets
-            demo_balance = current_total_assets
+            # 새로운 거래 시작: 시작 잔고와 데모 잔고를 초기 투자금으로 설정
+            start_balance = initial_capital
+            demo_balance = initial_capital
             log_and_update('정보', '새로운 거래를 시작합니다.')
             update_gui('action_status', 'waiting')
             total_invested = 0
@@ -3506,6 +3516,9 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             # 긴급 청산 체크
             held_value = sum(pos['quantity'] * price for pos in demo_positions)
+            
+            # 총자산 = 현금 잔고 + 코인 가치 (실현수익은 별도로 추가해야 함)
+            current_realized_profit = calculate_total_realized_profit()
             total_value = demo_balance + held_value
             
             # 코인 보유량이 0일 때 평가수익도 0으로 처리
@@ -3513,10 +3526,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             if coin_quantity == 0:
                 held_value = 0  # 보유 코인이 없으면 코인가치도 0
             
-            profit_percent = (total_value - start_balance) / start_balance * 100 if start_balance > 0 else 0
+            # 긴급청산용 임시 수익률 계산
+            temp_profit_percent = (total_value - start_balance) / start_balance * 100 if start_balance > 0 else 0
             
             if (config.get("emergency_exit_enabled", True) and 
-                profit_percent <= config.get("stop_loss_threshold", -10.0)):
+                temp_profit_percent <= config.get("stop_loss_threshold", -10.0)):
                 # 모든 포지션 청산
                 total_emergency_profit = 0
                 for position in demo_positions[:]:
@@ -3554,16 +3568,32 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 log_and_update('트레일링청산', f'최고점 대비 {config.get("trailing_stop_percent", 3.0)}% 하락')
                 break
                 
-            profit = total_value - start_balance
+            # 평가수익 계산 (현재가 기준 코인가치 - 매수가 기준 투자금액)
+            invested_amount = sum(pos['quantity'] * pos['actual_buy_price'] for pos in demo_positions)
+            unrealized_profit = held_value - invested_amount  # 평가수익 = 현재 코인가치 - 투자금액
             
-            # 코인 보유량이 0일 때 평가수익도 현금 잔고 기준으로만 계산
+            # 총자산 = 초기 투자금 + 실현수익 + 평가수익
+            total_value = start_balance + current_realized_profit + unrealized_profit
+            
+            # 전체 수익 = 실현수익 + 평가수익  
+            profit = current_realized_profit + unrealized_profit
+            
+            # 전체 수익률 계산
+            profit_percent = (profit / start_balance) * 100 if start_balance > 0 else 0
+            
+            # 코인 보유량이 0일 때 평가수익도 0으로 처리
             if coin_quantity == 0:
-                profit = demo_balance - start_balance  # 현금 잔고 - 시작 잔고
-                total_value = demo_balance  # 총 자산도 현금만
+                unrealized_profit = 0
+                held_value = 0
+                profit = current_realized_profit  # 실현수익만
+                total_value = start_balance + current_realized_profit  # 초기금 + 실현수익
                 
-            realized_profit_percent = (total_realized_profit / total_investment) * 100 if total_investment > 0 else 0
+            realized_profit_percent = (current_realized_profit / total_investment) * 100 if total_investment > 0 else 0
             
-            update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent)
+            # 평가수익과 평가수익률 계산
+            unrealized_profit_percent = (unrealized_profit / total_investment) * 100 if total_investment > 0 else 0
+            
+            update_gui('details', demo_balance, coin_quantity, held_value, total_value, profit, profit_percent, current_realized_profit, realized_profit_percent, unrealized_profit, unrealized_profit_percent)
 
             # 고급 그리드 차트 상태 업데이트
             positions = demo_positions
@@ -4103,7 +4133,7 @@ def start_dashboard():
         
         # 상세 정보
         detail_labels[ticker] = {
-            'profit': ttk.Label(ticker_frame, text="평가수익: 0원", style="Gray.TLabel"),
+            'profit': ttk.Label(ticker_frame, text="총수익: 0원", style="Gray.TLabel"),
             'profit_rate': ttk.Label(ticker_frame, text="(0.00%)", style="Gray.TLabel"),
             'realized_profit': ttk.Label(ticker_frame, text="실현수익: 0원", style="Gray.TLabel"),
             'realized_profit_rate': ttk.Label(ticker_frame, text="(0.00%)", style="Gray.TLabel"),
@@ -4749,7 +4779,7 @@ def start_dashboard():
         # 2. 각 티커별 상세 정보 초기화
         # 2. 각 티커별 상세 정보 초기화 (이 부분은 이미 clear_all_data 함수 내에 있으므로 중복 제거)
         for ticker in tickers:
-            detail_labels[ticker]['profit'].config(text="평가수익: 0원", style="Gray.TLabel")
+            detail_labels[ticker]['profit'].config(text="총수익: 0원", style="Gray.TLabel")
             detail_labels[ticker]['profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
             detail_labels[ticker]['realized_profit'].config(text="실현수익: 0원", style="Gray.TLabel")
             detail_labels[ticker]['realized_profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
@@ -5247,18 +5277,27 @@ def start_dashboard():
                 elif key == 'running_time':
                     running_time_labels[ticker].config(text=args[0], style="Blue.TLabel")
                 elif key == 'details':
-                    cash, coin_qty, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent = args
+                    if len(args) == 10:
+                        cash, coin_qty, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent, unrealized_profit, unrealized_profit_percent = args
+                    else:
+                        # 기존 호환성 유지
+                        cash, coin_qty, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent = args
+                        unrealized_profit = profit - total_realized_profit
+                        unrealized_profit_percent = 0
                     
                     # 코인 보유량이 0일 때 평가수익을 0으로 강제 설정
                     if coin_qty == 0:
                         held_value = 0
-                        profit = 0  # 평가수익 0으로 설정
-                        profit_percent = 0  # 평가수익률도 0으로 설정
+                        unrealized_profit = 0
+                        unrealized_profit_percent = 0
+                        profit = total_realized_profit  # 실현수익만
+                        profit_percent = realized_profit_percent
                     
                     profit_style = get_profit_color_style(profit)
                     realized_profit_style = get_profit_color_style(total_realized_profit)
-
-                    detail_labels[ticker]['profit'].config(text=f"평가수익: {profit:,.0f}원", style=profit_style)
+                    
+                    # profit는 실현수익 + 평가수익의 총합이므로 "총수익"으로 표시
+                    detail_labels[ticker]['profit'].config(text=f"총수익: {profit:,.0f}원", style=profit_style)
                     detail_labels[ticker]['profit_rate'].config(text=f"({profit_percent:+.2f}%)", style=profit_style)
                     detail_labels[ticker]['realized_profit'].config(text=f"실현수익: {total_realized_profit:,.0f}원", style=realized_profit_style)
                     detail_labels[ticker]['realized_profit_rate'].config(text=f"({realized_profit_percent:+.2f}%)", style=realized_profit_style)
