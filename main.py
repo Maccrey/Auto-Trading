@@ -50,8 +50,8 @@ class CentralizedDataManager:
         self.stop_worker = False
         self.worker_thread = None
         
-        # 데이터 수집 주기 (초)
-        self.update_interval = 3
+        # 데이터 수집 주기 (초) - 실시간 성능 개선을 위해 단축
+        self.update_interval = 2
         
         # 초기화
         self._initialize_data()
@@ -127,13 +127,28 @@ class CentralizedDataManager:
                             if ticker in prices and prices[ticker] is not None:
                                 self.current_prices[ticker] = prices[ticker]
                                 self.last_update[ticker] = datetime.now()
+                                # XRP 디버깅
+                                if ticker == 'KRW-XRP':
+                                    print(f"🔍 XRP 가격 수집 성공: {prices[ticker]:,.0f}")
                     else:  # 단일 티커인 경우
                         if len(self.tickers) == 1:
                             self.current_prices[self.tickers[0]] = prices
                             self.last_update[self.tickers[0]] = datetime.now()
+            else:
+                print("❌ 가격 일괄 수집 실패: prices=None")
                             
         except Exception as e:
-            print(f"현재 가격 수집 오류: {e}")
+            print(f"❌ 현재 가격 수집 오류: {e}")
+            # XRP 개별 재시도
+            try:
+                xrp_price = pyupbit.get_current_price('KRW-XRP')
+                if xrp_price:
+                    with self.data_lock:
+                        self.current_prices['KRW-XRP'] = xrp_price
+                        self.last_update['KRW-XRP'] = datetime.now()
+                    print(f"✅ XRP 개별 수집 성공: {xrp_price:,.0f}")
+            except Exception as xrp_e:
+                print(f"❌ XRP 개별 수집도 실패: {xrp_e}")
             
     def _collect_orderbooks(self):
         """모든 코인 호가 데이터 수집"""
@@ -156,41 +171,59 @@ class CentralizedDataManager:
             current_time = datetime.now()
             
             for ticker in self.tickers:
-                # 1분 간격으로 1분봉 업데이트
-                if (current_time - self.last_update.get(f"{ticker}_1m", datetime.min)).seconds >= 60:
+                # 1분 간격으로 1분봉 업데이트 (초기에는 즉시 수집)
+                last_1m = self.last_update.get(f"{ticker}_1m", datetime.min)
+                if (current_time - last_1m).seconds >= 60 or last_1m == datetime.min:
                     try:
                         df = pyupbit.get_ohlcv(ticker, interval='minute1', count=60)
                         if df is not None:
                             with self.data_lock:
                                 self.ohlcv_data[ticker]['minute1'] = df
                                 self.last_update[f"{ticker}_1m"] = current_time
-                    except:
+                                # XRP 디버깅
+                                if ticker == 'KRW-XRP':
+                                    print(f"🔍 XRP minute1 데이터 수집: {len(df)}행")
+                    except Exception as e:
+                        if ticker == 'KRW-XRP':
+                            print(f"❌ XRP minute1 수집 실패: {e}")
                         continue
                         
-                # 5분 간격으로 다른 timeframe 업데이트
-                if (current_time - self.last_update.get(f"{ticker}_5m", datetime.min)).seconds >= 300:
+                # 5분 간격으로 다른 timeframe 업데이트 (초기에는 즉시 수집)
+                last_5m = self.last_update.get(f"{ticker}_5m", datetime.min)
+                if (current_time - last_5m).seconds >= 300 or last_5m == datetime.min:
                     try:
                         # 5분봉
                         df = pyupbit.get_ohlcv(ticker, interval='minute5', count=288)
                         if df is not None:
                             with self.data_lock:
                                 self.ohlcv_data[ticker]['minute5'] = df
+                                # XRP 디버깅
+                                if ticker == 'KRW-XRP':
+                                    print(f"🔍 XRP minute5 데이터 수집: {len(df)}행")
                                 
                         # 15분봉
                         df = pyupbit.get_ohlcv(ticker, interval='minute15', count=96)
                         if df is not None:
                             with self.data_lock:
                                 self.ohlcv_data[ticker]['minute15'] = df
+                                # XRP 디버깅
+                                if ticker == 'KRW-XRP':
+                                    print(f"🔍 XRP minute15 데이터 수집: {len(df)}행")
                                 
                         # 1시간봉
-                        df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)
+                        df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
                         if df is not None:
                             with self.data_lock:
                                 self.ohlcv_data[ticker]['minute60'] = df
+                                # XRP 디버깅
+                                if ticker == 'KRW-XRP':
+                                    print(f"🔍 XRP minute60 데이터 수집: {len(df)}행")
                                 
                         self.last_update[f"{ticker}_5m"] = current_time
                         
-                    except:
+                    except Exception as e:
+                        if ticker == 'KRW-XRP':
+                            print(f"❌ XRP OHLCV 수집 실패: {e}")
                         continue
                         
         except Exception as e:
@@ -244,6 +277,21 @@ class CentralizedDataManager:
         
         with self.data_lock:
             df = self.ohlcv_data.get(ticker, {}).get(mapped_interval)
+            
+            # XRP 디버깅
+            if ticker == 'KRW-XRP':
+                print(f"🔍 데이터매니저 XRP 조회: {interval}->{mapped_interval}")
+                if ticker in self.ohlcv_data:
+                    available = list(self.ohlcv_data[ticker].keys())
+                    print(f"  ✅ XRP 사용가능 간격: {available}")
+                    if mapped_interval in self.ohlcv_data[ticker]:
+                        data_len = len(self.ohlcv_data[ticker][mapped_interval]) if self.ohlcv_data[ticker][mapped_interval] is not None else 0
+                        print(f"  ✅ XRP {mapped_interval} 데이터: {data_len}행")
+                    else:
+                        print(f"  ❌ XRP {mapped_interval} 데이터 없음")
+                else:
+                    print(f"  ❌ XRP 티커 자체가 ohlcv_data에 없음")
+            
             if df is not None and len(df) >= count:
                 return df.tail(count)
             return df
@@ -491,6 +539,18 @@ class CoinSpecificGridManager:
                 "price_tier_multiplier": 1.3
             }
         }
+        
+        # 동적 시간대 최적화
+        self.optimal_timeframes = {}  # 코인별 최적 시간대 저장
+        self.timeframe_update_time = {}  # 시간대 마지막 업데이트 시간
+        self.timeframe_update_interval = 3600  # 1시간마다 시간대 재계산
+        self.dynamic_price_ranges = {}  # 코인별 동적 가격 범위 저장
+        
+        # 최적 가격범위 기준 선택 시스템
+        self.available_timeframes = [0.5, 1, 2, 4, 12]  # 30분, 1시간, 2시간, 4시간, 12시간
+        self.timeframe_analysis_cache = {}  # 분석 결과 캐시
+        self.last_timeframe_optimization = {}  # 마지막 최적화 시간
+        self.optimal_settings_history = {}  # 최적 설정 이력
     
     def get_coin_profile(self, ticker):
         """코인별 프로필 반환"""
@@ -560,6 +620,358 @@ class CoinSpecificGridManager:
         manual_period = coin_config.get('price_range_hours', 4)  # 기본 4시간
         print(f"📊 {coin_name} 수동 기간: {manual_period}시간")
         return manual_period
+    
+    def analyze_timeframe_profitability(self, ticker, timeframe_hours):
+        """특정 시간대에서의 수익성 분석"""
+        try:
+            print(f"📊 {get_korean_coin_name(ticker)} {timeframe_hours}시간 구간 수익성 분석 중...")
+            
+            # 해당 시간대의 가격 범위 계산
+            high_price, low_price = calculate_price_range_hours(ticker, timeframe_hours)
+            if not high_price or not low_price or high_price == low_price:
+                return {'score': 0, 'reason': '가격 데이터 부족'}
+            
+            price_range_ratio = (high_price - low_price) / low_price
+            current_price = pyupbit.get_current_price(ticker)
+            if not current_price:
+                return {'score': 0, 'reason': '현재 가격 조회 실패'}
+            
+            # 1. 가격 위치 분석 (현재가가 범위의 어디에 위치하는가)
+            price_position = (current_price - low_price) / (high_price - low_price) if high_price != low_price else 0.5
+            position_score = abs(0.5 - price_position)  # 중간 위치일수록 좋음 (0에 가까울수록)
+            
+            # 2. 변동성 분석
+            volatility_score = min(price_range_ratio * 100, 10)  # 적정 변동성 선호
+            
+            # 3. 기술적 분석 - RSI 및 볼린저밴드
+            technical_score = self._calculate_technical_score(ticker, timeframe_hours)
+            
+            # 4. 거래량 분석
+            volume_score = self._analyze_volume_pattern(ticker, timeframe_hours)
+            
+            # 5. 트렌드 강도 분석
+            trend_score = self._analyze_trend_strength(ticker, timeframe_hours)
+            
+            # 종합 점수 계산 (가중 평균)
+            total_score = (
+                (1 - position_score) * 0.2 +        # 20% - 가격 위치 (중간이 좋음)
+                min(volatility_score, 5) * 0.25 +   # 25% - 변동성 (적정 수준)
+                technical_score * 0.25 +            # 25% - 기술적 분석
+                volume_score * 0.15 +               # 15% - 거래량
+                trend_score * 0.15                  # 15% - 트렌드 강도
+            )
+            
+            return {
+                'score': total_score,
+                'price_range_ratio': price_range_ratio,
+                'price_position': price_position,
+                'volatility_score': volatility_score,
+                'technical_score': technical_score,
+                'volume_score': volume_score,
+                'trend_score': trend_score,
+                'high_price': high_price,
+                'low_price': low_price,
+                'reason': f'종합점수: {total_score:.2f}'
+            }
+            
+        except Exception as e:
+            print(f"시간대 분석 오류 ({ticker}, {timeframe_hours}h): {e}")
+            return {'score': 0, 'reason': f'분석 오류: {e}'}
+    
+    def _calculate_technical_score(self, ticker, timeframe_hours):
+        """기술적 분석 점수 계산"""
+        try:
+            # 적절한 캔들 개수 계산 (시간대에 따라 조정)
+            if timeframe_hours >= 12:
+                interval = 'minute60'
+                count = int(timeframe_hours * 2)  # 2배수로 충분한 데이터
+            elif timeframe_hours >= 4:
+                interval = 'minute60'
+                count = int(timeframe_hours * 3)
+            elif timeframe_hours >= 1:
+                interval = 'minute15'
+                count = int(timeframe_hours * 6)
+            else:  # 30분
+                interval = 'minute5'
+                count = int(timeframe_hours * 20)
+            
+            count = max(20, min(count, 200))  # 최소 20개, 최대 200개
+            
+            df = data_manager.get_ohlcv(ticker, interval=interval, count=count)
+            if df is None or len(df) < 14:
+                return 0
+            
+            # RSI 계산
+            rsi = self._calculate_rsi(df['close'])
+            rsi_score = 0
+            if 30 <= rsi <= 70:  # 적정 구간
+                rsi_score = 1.0
+            elif 20 <= rsi < 30 or 70 < rsi <= 80:  # 과매도/과매수 초기
+                rsi_score = 0.7
+            else:  # 극한 구간
+                rsi_score = 0.3
+            
+            # 볼린저밴드 분석
+            bb_score = self._calculate_bollinger_score(df['close'])
+            
+            # 이동평균 분석
+            ma_score = self._calculate_moving_average_score(df['close'])
+            
+            return (rsi_score * 0.4 + bb_score * 0.3 + ma_score * 0.3) * 5  # 0-5점 스케일
+            
+        except Exception as e:
+            print(f"기술적 분석 오류 ({ticker}): {e}")
+            return 0
+    
+    def _calculate_rsi(self, prices, period=14):
+        """RSI 계산"""
+        try:
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi.iloc[-1] if not rsi.empty else 50
+        except:
+            return 50
+    
+    def _calculate_bollinger_score(self, prices, period=20):
+        """볼린저밴드 점수 계산"""
+        try:
+            sma = prices.rolling(window=period).mean()
+            std = prices.rolling(window=period).std()
+            upper_band = sma + (std * 2)
+            lower_band = sma - (std * 2)
+            
+            current_price = prices.iloc[-1]
+            bb_width = (upper_band.iloc[-1] - lower_band.iloc[-1]) / sma.iloc[-1]
+            
+            # 볼린저밴드 폭이 적정할 때 높은 점수
+            if 0.05 <= bb_width <= 0.15:  # 5-15% 폭
+                return 1.0
+            elif bb_width < 0.05:  # 너무 좁음
+                return 0.5
+            else:  # 너무 넓음
+                return 0.7
+        except:
+            return 0.5
+    
+    def _calculate_moving_average_score(self, prices):
+        """이동평균 점수 계산"""
+        try:
+            ma5 = prices.rolling(window=5).mean().iloc[-1]
+            ma10 = prices.rolling(window=10).mean().iloc[-1]
+            ma20 = prices.rolling(window=20).mean().iloc[-1]
+            current_price = prices.iloc[-1]
+            
+            # 이동평균 정렬 점수
+            score = 0
+            if ma5 > ma10 > ma20:  # 상승 추세
+                score += 0.5
+            elif ma5 < ma10 < ma20:  # 하락 추세
+                score += 0.5
+            
+            # 현재가와 이동평균 관계
+            if ma10 * 0.98 <= current_price <= ma10 * 1.02:  # ±2% 범위
+                score += 0.5
+            
+            return score
+        except:
+            return 0.5
+    
+    def _analyze_volume_pattern(self, ticker, timeframe_hours):
+        """거래량 패턴 분석"""
+        try:
+            interval = 'minute60' if timeframe_hours >= 2 else 'minute15'
+            count = min(int(timeframe_hours * 5), 100)
+            
+            df = data_manager.get_ohlcv(ticker, interval=interval, count=count)
+            if df is None or len(df) < 5:
+                return 0.5
+            
+            # 거래량 평균 대비 최근 거래량
+            recent_volume = df['volume'].tail(5).mean()
+            avg_volume = df['volume'].mean()
+            volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
+            
+            # 적정 거래량 비율일 때 높은 점수
+            if 0.8 <= volume_ratio <= 1.5:
+                return 1.0
+            elif volume_ratio > 1.5:
+                return 0.7  # 거래량 급증
+            else:
+                return 0.4  # 거래량 부족
+                
+        except:
+            return 0.5
+    
+    def _analyze_trend_strength(self, ticker, timeframe_hours):
+        """트렌드 강도 분석"""
+        try:
+            interval = 'minute60' if timeframe_hours >= 2 else 'minute15'
+            count = min(int(timeframe_hours * 3), 50)
+            
+            df = data_manager.get_ohlcv(ticker, interval=interval, count=count)
+            if df is None or len(df) < 10:
+                return 0.5
+            
+            # 선형 회귀를 이용한 트렌드 강도 계산
+            x = range(len(df))
+            y = df['close'].values
+            
+            # 단순 기울기 계산
+            x_mean = sum(x) / len(x)
+            y_mean = sum(y) / len(y)
+            
+            numerator = sum((x[i] - x_mean) * (y[i] - y_mean) for i in range(len(x)))
+            denominator = sum((x[i] - x_mean) ** 2 for i in range(len(x)))
+            
+            if denominator == 0:
+                return 0.5
+                
+            slope = numerator / denominator
+            
+            # R² 계산 (결정계수)
+            y_pred = [slope * (x[i] - x_mean) + y_mean for i in range(len(x))]
+            ss_res = sum((y[i] - y_pred[i]) ** 2 for i in range(len(x)))
+            ss_tot = sum((y[i] - y_mean) ** 2 for i in range(len(y)))
+            
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+            
+            # 트렌드가 명확할수록 높은 점수 (R² 기반)
+            return min(r_squared * 2, 1.0)  # 최대 1.0점
+            
+        except:
+            return 0.5
+    
+    def find_optimal_timeframe_and_grid(self, ticker, force_update=False):
+        """코인별 최적 시간대와 그리드 설정 찾기"""
+        try:
+            coin_name = get_korean_coin_name(ticker)
+            
+            # 캐시 확인 (1시간 이내 분석 결과가 있으면 사용)
+            cache_key = f"{ticker}_optimal"
+            current_time = datetime.now()
+            
+            if not force_update and cache_key in self.timeframe_analysis_cache:
+                cached_data = self.timeframe_analysis_cache[cache_key]
+                if (current_time - cached_data['timestamp']).seconds < 3600:  # 1시간 이내
+                    print(f"✅ {coin_name} 캐시된 최적 설정 사용: {cached_data['optimal_timeframe']}시간")
+                    return cached_data['optimal_timeframe'], cached_data['optimal_grid_count']
+            
+            print(f"🔍 {coin_name} 최적 시간대/그리드 분석 시작...")
+            
+            best_score = 0
+            best_timeframe = 4  # 기본값
+            best_analysis = {}
+            
+            # 각 시간대별 분석
+            for timeframe in self.available_timeframes:
+                analysis = self.analyze_timeframe_profitability(ticker, timeframe)
+                score = analysis.get('score', 0)
+                
+                timeframe_str = f"{int(timeframe * 60)}분" if timeframe < 1 else f"{int(timeframe)}시간"
+                print(f"  📊 {timeframe_str}: 점수 {score:.2f} - {analysis.get('reason', '')}")
+                
+                if score > best_score:
+                    best_score = score
+                    best_timeframe = timeframe
+                    best_analysis = analysis
+            
+            # 최적 그리드 수 계산 (가격 범위와 변동성 기반)
+            if best_analysis:
+                price_range_ratio = best_analysis.get('price_range_ratio', 0.1)
+                volatility_score = best_analysis.get('volatility_score', 2.5)
+                
+                # 기본 그리드 수에서 조정
+                base_grid_count = self.coin_profiles.get(ticker, self.coin_profiles["KRW-BTC"])['optimal_grid_base']
+                
+                # 변동성과 가격 범위에 따른 조정
+                volatility_adjustment = min(volatility_score / 2.5, 2.0)  # 최대 2배
+                range_adjustment = min(price_range_ratio * 100, 1.5)      # 최대 1.5배
+                
+                optimal_grid_count = int(base_grid_count * volatility_adjustment * range_adjustment)
+                optimal_grid_count = max(10, min(optimal_grid_count, 50))  # 10-50개 제한
+                
+            else:
+                optimal_grid_count = 20  # 기본값
+            
+            # 결과 캐시
+            self.timeframe_analysis_cache[cache_key] = {
+                'optimal_timeframe': best_timeframe,
+                'optimal_grid_count': optimal_grid_count,
+                'score': best_score,
+                'analysis': best_analysis,
+                'timestamp': current_time
+            }
+            
+            # 설정 적용
+            if ticker not in self.coin_profiles:
+                self.coin_profiles[ticker] = self.coin_profiles["KRW-BTC"].copy()
+            
+            self.coin_profiles[ticker]['price_range_days'] = best_timeframe / 24  # 일 단위로 변환
+            self.coin_profiles[ticker]['grid_count'] = optimal_grid_count
+            self.coin_profiles[ticker]['last_optimization'] = current_time
+            
+            timeframe_str = f"{int(best_timeframe * 60)}분" if best_timeframe < 1 else f"{int(best_timeframe)}시간"
+            print(f"✅ {coin_name} 최적 설정: {timeframe_str} 구간, {optimal_grid_count}개 그리드 (점수: {best_score:.2f})")
+            
+            return best_timeframe, optimal_grid_count
+            
+        except Exception as e:
+            print(f"최적 설정 분석 오류 ({ticker}): {e}")
+            return 4, 20  # 기본값 반환
+    
+    def update_optimal_settings_for_all_coins(self, force_update=False):
+        """모든 코인의 최적 설정 업데이트"""
+        try:
+            print("🚀 전체 코인 최적 설정 업데이트 시작...")
+            tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+            
+            for ticker in tickers:
+                try:
+                    optimal_timeframe, optimal_grid_count = self.find_optimal_timeframe_and_grid(ticker, force_update)
+                    
+                    # 글로벌 차트 데이터 업데이트
+                    if 'chart_data' in globals():
+                        self._update_chart_data_with_optimal_settings(ticker, optimal_timeframe, optimal_grid_count)
+                    
+                except Exception as e:
+                    print(f"코인 최적화 오류 ({ticker}): {e}")
+                    
+            print("✅ 전체 코인 최적 설정 업데이트 완료")
+            return True
+            
+        except Exception as e:
+            print(f"전체 최적 설정 업데이트 오류: {e}")
+            return False
+    
+    def _update_chart_data_with_optimal_settings(self, ticker, optimal_timeframe, optimal_grid_count):
+        """차트 데이터를 최적 설정으로 업데이트"""
+        try:
+            # 최적 가격 범위 계산
+            high_price, low_price = calculate_price_range_hours(ticker, optimal_timeframe)
+            
+            if high_price and low_price and high_price > low_price:
+                # 그리드 레벨 생성
+                price_gap = (high_price - low_price) / optimal_grid_count
+                grid_levels = [low_price + (price_gap * i) for i in range(optimal_grid_count + 1)]
+                
+                # 투자금 분배 (임시)
+                allocated_amount = 10000000 // 3  # 3개 코인으로 나눔
+                
+                # 글로벌 chart_data 업데이트
+                if 'chart_data' in globals():
+                    globals()['chart_data'][ticker] = (
+                        high_price, low_price, grid_levels, 
+                        optimal_grid_count, allocated_amount, f"{optimal_timeframe}시간"
+                    )
+                
+                coin_name = get_korean_coin_name(ticker)
+                print(f"📊 {coin_name} 차트 데이터 업데이트: {optimal_grid_count}개 그리드, {optimal_timeframe}시간")
+                
+        except Exception as e:
+            print(f"차트 데이터 업데이트 오류 ({ticker}): {e}")
 
 # 완전 자동 거래 시스템
 class AutoTradingSystem:
@@ -926,10 +1338,98 @@ class AutoTradingSystem:
             print(f"최적 기간 계산 오류: {e}")
             return 7, 20
     
+    def update_dynamic_timeframes(self, force=False):
+        """모든 코인의 동적 시간대 업데이트"""
+        current_time = datetime.now()
+        tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+        
+        for ticker in tickers:
+            # 1시간마다 또는 강제 업데이트인 경우
+            last_update = self.timeframe_update_time.get(ticker, datetime.min)
+            time_elapsed = (current_time - last_update).total_seconds()
+            
+            if force or time_elapsed >= self.timeframe_update_interval:
+                try:
+                    print(f"🔄 {get_korean_coin_name(ticker)} 최적 시간대 재분석 중...")
+                    
+                    # 여러 시간대 데이터 분석
+                    timeframe_results = calculate_price_range_multiple_timeframes(ticker)
+                    
+                    # 최적 시간대 선택
+                    optimal_timeframe, timeframe_data = select_optimal_timeframe(ticker, timeframe_results)
+                    
+                    # 결과 저장
+                    self.optimal_timeframes[ticker] = optimal_timeframe
+                    self.timeframe_update_time[ticker] = current_time
+                    
+                    if timeframe_data:
+                        self.dynamic_price_ranges[ticker] = {
+                            'high': timeframe_data['high'],
+                            'low': timeframe_data['low'],
+                            'volatility': timeframe_data['volatility'],
+                            'timeframe': optimal_timeframe,
+                            'update_time': current_time
+                        }
+                        
+                        # coin_profiles에 최적 시간대 정보 업데이트
+                        if ticker not in self.coin_profiles:
+                            self.coin_profiles[ticker] = {}
+                        self.coin_profiles[ticker]['optimal_timeframe'] = optimal_timeframe
+                        self.coin_profiles[ticker]['timeframe_score'] = timeframe_data.get('profit_potential', 0)
+                        
+                        # 변동성에 따른 그리드 수 동적 조정
+                        volatility = timeframe_data['volatility']
+                        if volatility < 5:
+                            # 낮은 변동성: 적은 그리드
+                            adjusted_grid = max(15, int(20 * 0.7))
+                        elif volatility < 15:
+                            # 보통 변동성: 기본 그리드
+                            adjusted_grid = 20
+                        elif volatility < 30:
+                            # 높은 변동성: 많은 그리드
+                            adjusted_grid = min(35, int(20 * 1.5))
+                        else:
+                            # 매우 높은 변동성: 최대 그리드
+                            adjusted_grid = min(40, int(20 * 1.8))
+                        
+                        self.coin_profiles[ticker]['grid_count'] = adjusted_grid
+                        self.coin_profiles[ticker]['price_range_days'] = self._timeframe_to_days(optimal_timeframe)
+                        
+                        print(f"✅ {get_korean_coin_name(ticker)}: {optimal_timeframe} → {adjusted_grid}개 그리드 (변동성: {volatility:.2f}%)")
+                    
+                except Exception as e:
+                    print(f"❌ {ticker} 동적 시간대 업데이트 오류: {e}")
+                    # 기본값 설정
+                    self.optimal_timeframes[ticker] = '1시간'
+                    self.timeframe_update_time[ticker] = current_time
+
+    def _timeframe_to_days(self, timeframe):
+        """시간대 문자열을 일수로 변환"""
+        timeframe_map = {
+            '15분': 1,    # 1일치 데이터
+            '30분': 1,    # 1일치 데이터
+            '1시간': 2,   # 2일치 데이터
+            '4시간': 7    # 7일치 데이터
+        }
+        return timeframe_map.get(timeframe, 2)
+
+    def get_optimal_price_range(self, ticker):
+        """코인의 최적 가격 범위 반환"""
+        if ticker in self.dynamic_price_ranges:
+            return self.dynamic_price_ranges[ticker]['high'], self.dynamic_price_ranges[ticker]['low']
+        
+        # 동적 범위가 없으면 기본 계산
+        optimal_timeframe = self.optimal_timeframes.get(ticker, '1시간')
+        days = self._timeframe_to_days(optimal_timeframe)
+        return calculate_price_range(ticker, f"{days}일")
+
     def force_optimization_for_all_coins(self):
         """모든 코인에 대해 강제로 최적화 실행"""
         tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
         print("🚀 전체 코인 자동 최적화 강제 실행 시작...")
+        
+        # 먼저 동적 시간대 업데이트
+        self.update_dynamic_timeframes(force=True)
         
         # 최적화 결과를 저장할 딕셔너리
         optimization_results = {}
@@ -1429,6 +1929,10 @@ class AutoOptimizationScheduler:
         print(f"🤖 자동 최적화 워커 시작 - {interval_minutes}분 간격으로 실행")
         print(f"⏰ 첫 번째 자동 최적화까지 {interval_minutes}분 대기...")
         
+        # 동적 시간대 업데이트를 위한 카운터
+        timeframe_update_counter = 0
+        timeframe_update_interval_cycles = max(1, 60 // interval_minutes)  # 1시간마다 시간대 업데이트
+        
         while not self.stop_optimization:
             try:
                 # 먼저 설정된 간격만큼 대기
@@ -1451,6 +1955,32 @@ class AutoOptimizationScheduler:
                 
                 # 자동 거래 모드가 활성화된 경우에만 최적화 실행
                 if config.get('auto_trading_mode', False) and config.get('auto_optimization', True):
+                    # 1시간마다 최적 시간대 및 그리드 설정 업데이트
+                    timeframe_update_counter += 1
+                    if timeframe_update_counter >= timeframe_update_interval_cycles:
+                        print("🔄 최적 시간대/그리드 설정 업데이트 실행...")
+                        try:
+                            if 'coin_grid_manager' in globals():
+                                # 새로운 최적화 시스템 사용
+                                coin_grid_manager.update_optimal_settings_for_all_coins(force_update=True)
+                                print("✅ 최적 시간대/그리드 설정 업데이트 완료")
+                                
+                                # 차트 데이터 강제 새로고침
+                                if 'chart_data' in globals():
+                                    print("📊 차트 데이터 새로고침...")
+                                    # GUI 큐를 통해 차트 새로고침 신호 보내기
+                                    try:
+                                        if update_callback:
+                                            update_callback("optimal_update")
+                                    except Exception as cb_e:
+                                        print(f"콜백 호출 오류: {cb_e}")
+                                
+                            else:
+                                print("⚠️ coin_grid_manager를 찾을 수 없음")
+                        except Exception as e:
+                            print(f"❌ 최적 설정 업데이트 오류: {e}")
+                        timeframe_update_counter = 0  # 카운터 리셋
+                    
                     print("✅ 조건 만족 - 자동 최적화 실행")
                     self._perform_optimization(update_callback)
                 else:
@@ -3208,6 +3738,132 @@ def calculate_price_range_hours(ticker, hours):
     return None, None
 
 # 가격 범위 계산 함수
+def calculate_price_range_multiple_timeframes(ticker):
+    """여러 시간대의 가격 범위 계산 및 최적 수익률 분석"""
+    timeframes = {
+        '15분': {'interval': 'minute15', 'count': 60, 'hours': 15},    # 15시간 데이터
+        '30분': {'interval': 'minute30', 'count': 48, 'hours': 24},    # 24시간 데이터  
+        '1시간': {'interval': 'minute60', 'count': 48, 'hours': 48},   # 48시간 데이터
+        '4시간': {'interval': 'minute240', 'count': 42, 'hours': 168}, # 7일 데이터
+    }
+    
+    results = {}
+    
+    for timeframe_name, config in timeframes.items():
+        try:
+            # API에서 지원하지 않는 interval은 대체 방법 사용
+            if config['interval'] in ['minute30', 'minute240']:
+                if config['interval'] == 'minute30':
+                    # 30분 데이터는 1시간 데이터를 더 많이 가져와서 계산
+                    df = pyupbit.get_ohlcv(ticker, interval='minute60', count=config['count'])
+                elif config['interval'] == 'minute240':
+                    # 4시간 데이터는 일봉 데이터 사용
+                    df = pyupbit.get_ohlcv(ticker, interval='day', count=7)
+            else:
+                df = pyupbit.get_ohlcv(ticker, interval=config['interval'], count=config['count'])
+            
+            if df is not None and not df.empty:
+                high_price = df['high'].max()
+                low_price = df['low'].min()
+                
+                # 변동성 계산 (수익 잠재력 지표)
+                volatility = (high_price - low_price) / low_price * 100
+                
+                # 최근 가격 트렌드 분석
+                recent_price = df['close'].iloc[-1]
+                price_position = (recent_price - low_price) / (high_price - low_price) if high_price != low_price else 0.5
+                
+                # 거래량 분석 (있는 경우)
+                avg_volume = df['volume'].mean() if 'volume' in df.columns else 0
+                
+                results[timeframe_name] = {
+                    'high': high_price,
+                    'low': low_price,
+                    'volatility': volatility,
+                    'price_position': price_position,
+                    'avg_volume': avg_volume,
+                    'profit_potential': volatility * (0.6 - abs(price_position - 0.5)),  # 중앙 위치일 때 최대
+                    'data_points': len(df)
+                }
+                
+            else:
+                results[timeframe_name] = None
+                
+        except Exception as e:
+            print(f"{ticker} {timeframe_name} 데이터 가져오기 실패: {e}")
+            results[timeframe_name] = None
+    
+    return results
+
+def select_optimal_timeframe(ticker, timeframe_results):
+    """코인별 최적 시간대 선택"""
+    try:
+        # 유효한 결과만 필터링
+        valid_results = {k: v for k, v in timeframe_results.items() if v is not None}
+        
+        if not valid_results:
+            return '1시간', None  # 기본값
+        
+        # 각 시간대별 점수 계산
+        scored_timeframes = {}
+        
+        for timeframe, data in valid_results.items():
+            score = 0
+            
+            # 1. 변동성 점수 (10-50%가 이상적)
+            volatility = data['volatility']
+            if 10 <= volatility <= 50:
+                volatility_score = 100
+            elif volatility < 10:
+                volatility_score = volatility * 8  # 너무 낮으면 감점
+            else:
+                volatility_score = max(0, 100 - (volatility - 50) * 2)  # 너무 높으면 감점
+            
+            # 2. 수익 잠재력 점수
+            profit_potential = data['profit_potential']
+            profit_score = min(100, max(0, profit_potential * 2))
+            
+            # 3. 데이터 신뢰도 점수 (충분한 데이터 포인트)
+            data_points = data['data_points']
+            reliability_score = min(100, data_points * 2.5)  # 40개 이상이면 100점
+            
+            # 4. 시간대별 가중치
+            timeframe_weights = {
+                '15분': 1.2,  # 실시간 매매에 유리
+                '30분': 1.1,  # 빠른 반응
+                '1시간': 1.0,  # 표준
+                '4시간': 0.8   # 느린 반응
+            }
+            
+            weight = timeframe_weights.get(timeframe, 1.0)
+            
+            # 총 점수 계산
+            total_score = (volatility_score * 0.4 + profit_score * 0.35 + reliability_score * 0.25) * weight
+            scored_timeframes[timeframe] = {
+                'score': total_score,
+                'details': {
+                    'volatility_score': volatility_score,
+                    'profit_score': profit_score,
+                    'reliability_score': reliability_score,
+                    'weight': weight
+                },
+                'data': data
+            }
+        
+        # 최고 점수 시간대 선택
+        best_timeframe = max(scored_timeframes.keys(), key=lambda x: scored_timeframes[x]['score'])
+        best_data = scored_timeframes[best_timeframe]
+        
+        coin_name = get_korean_coin_name(ticker)
+        print(f"📊 {coin_name} 최적 시간대: {best_timeframe} (점수: {best_data['score']:.1f})")
+        print(f"   변동성: {best_data['data']['volatility']:.2f}%, 수익잠재력: {best_data['data']['profit_potential']:.2f}")
+        
+        return best_timeframe, best_data['data']
+        
+    except Exception as e:
+        print(f"{ticker} 최적 시간대 선택 오류: {e}")
+        return '1시간', None
+
 def calculate_price_range(ticker, period):
     """선택한 기간에 따라 상한가/하한가를 계산 (개선된 버전)"""
     print(f"🔍 가격 범위 계산 시작: {ticker}, 기간: {period}")
@@ -3400,6 +4056,10 @@ def check_advanced_grid_conditions(current_price, grid_price, action_type, grid_
 def get_chart_data(ticker, period):
     """차트용 데이터 가져오기"""
     try:
+        # XRP 디버깅
+        if ticker == 'KRW-XRP':
+            print(f"🔍 XRP 차트 데이터 요청: {period}")
+        
         if period == "1시간":
             df = data_manager.get_ohlcv(ticker, interval="minute5", count=60)
         elif period == "4시간":
@@ -3412,9 +4072,36 @@ def get_chart_data(ticker, period):
         else:
             df = data_manager.get_ohlcv(ticker, interval="minute60", count=48)
         
+        # XRP 디버깅: 데이터 조회 결과
+        if ticker == 'KRW-XRP':
+            if df is not None and not df.empty:
+                print(f"  ✅ XRP 데이터 조회 성공: {len(df)}행, 최신가: {df['close'].iloc[-1]:,.0f}")
+            else:
+                print(f"  ❌ XRP 데이터 조회 실패: df={df}")
+                # XRP 실패시 직접 API 재시도
+                try:
+                    print(f"  🔄 XRP 직접 API 재시도...")
+                    df = pyupbit.get_ohlcv(ticker, interval="minute60", count=48)
+                    if df is not None and not df.empty:
+                        print(f"  ✅ XRP 직접 API 성공: {len(df)}행")
+                    else:
+                        print(f"  ❌ XRP 직접 API도 실패")
+                except Exception as retry_e:
+                    print(f"  ❌ XRP 직접 API 오류: {retry_e}")
+        
         return df
     except Exception as e:
-        print(f"차트 데이터 가져오기 오류: {e}")
+        print(f"❌ 차트 데이터 가져오기 오류 ({ticker}): {e}")
+        # XRP의 경우 추가 시도
+        if ticker == 'KRW-XRP':
+            try:
+                print(f"🔄 XRP 응급 데이터 조회...")
+                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=24)
+                if df is not None and not df.empty:
+                    print(f"✅ XRP 응급 데이터 성공: {len(df)}행")
+                    return df
+            except:
+                pass
         return None
 
 # 백테스트 모듈
@@ -4799,7 +5486,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             speak_async(f"실거래 매수 완료, {get_korean_coin_name(ticker)} {price:,.0f}원")
                             
                             print(f"🔥 실거래 매수 완료: {quantity:.8f}개 @ {price:,.0f}원")
-                            # 거래 횟수는 execute_buy_order에서 이미 증가됨
+                            
+                            # 매수 카운트 업데이트
+                            if ticker in trade_counts:
+                                trade_counts[ticker]["buy"] += 1
+                            
                             update_gui('refresh_chart')  # GUI 즉시 새로고침
                         else:
                             print(f"❌ 실거래 매수 실패: API 응답 오류")
@@ -6019,6 +6710,13 @@ def start_dashboard():
                     if log_entry:
                         log_entry['ticker'] = representative_ticker
                         add_log_to_gui(log_entry)
+                    
+                    # Update chart data and refresh the chart
+                    price_gap = (high_price - low_price) / new_grid_count
+                    grid_levels = [low_price + (price_gap * i) for i in range(new_grid_count + 1)]
+                    allocated_amount = float(amount_entry.get())
+                    chart_data[representative_ticker] = (high_price, low_price, grid_levels, new_grid_count, allocated_amount, period)
+                    update_chart(representative_ticker, period)
                 else:
                     log_entry = log_trade(representative_ticker, '오류', f'{period} 기준 가격 범위 계산 실패')
                     if log_entry:
@@ -6178,6 +6876,7 @@ def start_dashboard():
     chart_container.pack(fill='x', padx=5, pady=5)
     
     # matplotlib 차트 설정
+    tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
     fig = Figure(figsize=(14, 4), dpi=80)
     charts = {}
     
@@ -6391,77 +7090,201 @@ def start_dashboard():
     
     # 캔버스가 키보드 포커스를 받을 수 있도록 설정
     canvas.get_tk_widget().focus_set()
+    
+    # 초기 차트 데이터 로딩 (모든 티커)
+    def load_initial_charts():
+        """초기 차트 데이터를 로드합니다"""
+        try:
+            print("📊 초기 차트 로딩 중...")
+            print(f"대상 티커: {tickers}")
+            print(f"차트 딕셔너리 키: {list(charts.keys())}")
+            
+            current_period = "1일"  # 기본 기간
+            success_count = 0
+            
+            for ticker in tickers:
+                try:
+                    print(f"🔄 {ticker} 차트 초기화 시도...")
+                    
+                    # 차트가 올바르게 생성되었는지 확인
+                    if ticker not in charts:
+                        print(f"❌ {ticker} 차트가 charts에 없음!")
+                        continue
+                    
+                    # 데이터 가져오기 테스트
+                    test_df = get_chart_data(ticker, current_period)
+                    if test_df is None or test_df.empty:
+                        print(f"❌ {ticker} 데이터 가져오기 실패")
+                        continue
+                    
+                    print(f"✅ {ticker} 데이터 확인됨 (shape: {test_df.shape})")
+                    
+                    # 그리드 데이터 생성 (자동 모드인 경우)
+                    if config.get('auto_trading_mode', False):
+                        try:
+                            # 자동 모드에서는 동적 시간대 최적화 사용
+                            if 'coin_grid_manager' in globals():
+                                # 먼저 동적 시간대 분석 실행
+                                auto_trading_system.update_dynamic_timeframes(force=True)
+                                
+                                # 최적화된 가격 범위 사용
+                                high_price, low_price = coin_grid_manager.get_optimal_price_range(ticker)
+                                
+                                if high_price and low_price:
+                                    # 그리드 수 계산
+                                    grid_count = coin_grid_manager.calculate_optimal_grid_count(ticker, [high_price, low_price], 10000000)
+                                    
+                                    # 그리드 레벨 생성
+                                    price_gap = (high_price - low_price) / grid_count
+                                    grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
+                                    
+                                    # chart_data에 저장
+                                    allocated_amount = 10000000 // len(tickers)  # 임시 분배 금액
+                                    chart_data[ticker] = (high_price, low_price, grid_levels, grid_count, allocated_amount, current_period)
+                                    
+                                    print(f"✅ {ticker} 그리드 데이터 생성: {grid_count}개 ({high_price:,.0f}~{low_price:,.0f})")
+                            else:
+                                print(f"⚠️ coin_grid_manager를 찾을 수 없음")
+                        except Exception as e:
+                            print(f"⚠️ {ticker} 그리드 데이터 생성 오류: {e}")
+                    else:
+                        # 수동 모드에서는 기본 그리드 생성
+                        try:
+                            # 7일 기준으로 가격 범위 계산
+                            high_price, low_price = calculate_price_range(ticker, "7일")
+                            
+                            if high_price and low_price:
+                                # 기본 그리드 수 계산 (20개)
+                                grid_count = 20
+                                price_gap = (high_price - low_price) / grid_count
+                                grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
+                                
+                                # chart_data에 저장
+                                allocated_amount = 10000000 // len(tickers)  # 임시 분배 금액
+                                chart_data[ticker] = (high_price, low_price, grid_levels, grid_count, allocated_amount, current_period)
+                                
+                                print(f"✅ {ticker} 기본 그리드 데이터 생성: {grid_count}개")
+                        except Exception as e:
+                            print(f"⚠️ {ticker} 기본 그리드 생성 오류: {e}")
+                    
+                    # 차트 업데이트 실행
+                    update_chart(ticker, current_period)
+                    success_count += 1
+                    print(f"✅ {ticker} 차트 초기화 완료")
+                    
+                except Exception as e:
+                    print(f"❌ 초기 {ticker} 차트 로딩 오류: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            print(f"✅ 초기 차트 로딩 완료 ({success_count}/{len(tickers)}개 성공)")
+            print(f"📊 chart_data 키: {list(chart_data.keys())}")
+            
+            # 차트가 모두 표시되도록 강제 새로고침
+            try:
+                canvas.draw()
+                print("🔄 캔버스 전체 새로고침 완료")
+            except Exception as e:
+                print(f"캔버스 새로고침 오류: {e}")
+                
+        except Exception as e:
+            print(f"초기 차트 로딩 전체 오류: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # GUI가 완전히 로드된 후 차트 데이터 로딩 (더 늦게 실행)
+    root.after(2000, load_initial_charts)
     canvas.get_tk_widget().bind('<Button-1>', lambda e: canvas.get_tk_widget().focus_set())
-
-    def on_hover(event):
-        if event.inaxes is None:
-            return
-
-        for ticker, ax in charts.items():
-            if event.inaxes == ax and hasattr(ax, 'hover_data'):
-                hover_data = ax.hover_data
-                annot = hover_data['annot']
-                found = False
-                
-                for scatter in hover_data['scatters']:
-                    cont, ind = scatter.contains(event)
-                    if cont:
-                        idx = ind['ind'][0]
-                        pos = scatter.get_offsets()[idx]
-                        annot.xy = pos
-                        
-                        point_info = ""
-                        for p in hover_data['points']:
-                            if abs(p['price'] - pos[1]) < 1e-6:
-                                point_info = p['info']
-                                break
-
-                        annot.set_text(point_info)
-                        annot.get_bbox_patch().set_alpha(0.8)
-                        annot.set_visible(True)
-                        canvas.draw_idle()
-                        found = True
-                        break
-                
-                if not found and annot.get_visible():
-                    annot.set_visible(False)
-                    canvas.draw_idle()
-
+    
+    # 차트 업데이트 함수 (완전한 기능 복구)
     def update_chart(ticker, period):
         """차트 업데이트"""
         if ticker not in charts:
+            print(f"❌ 오류: {ticker} 차트가 charts 딕셔너리에 없습니다.")
+            print(f"  현재 charts 키: {list(charts.keys())}")
             return
         
         df = get_chart_data(ticker, period)
         if df is None or df.empty:
-            return
+            print(f"❌ 오류: {ticker}의 차트 데이터가 비어있습니다.")
+            # XRP의 경우 추가 진단
+            if ticker == 'KRW-XRP':
+                try:
+                    # 직접 데이터 조회 시도
+                    test_df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+                    if test_df is not None and not test_df.empty:
+                        print(f"  ✅ 직접 조회 성공: {len(test_df)}행, 최근가: {test_df['close'].iloc[-1]}")
+                        df = test_df
+                    else:
+                        print(f"  ❌ 직접 조회도 실패")
+                        return
+                except Exception as e:
+                    print(f"  ❌ 직접 조회 오류: {e}")
+                    return
+            else:
+                return
+        
+        print(f"🔄 {ticker} 차트 업데이트 중... (데이터 행 수: {len(df)})")
         
         ax = charts[ticker]
         ax.clear()
         
-        # 자동 모드에서 현재 설정 표시
-        if config.get('auto_trading_mode', False):
-            try:
-                coin_config = coin_grid_manager.coin_profiles.get(ticker, coin_grid_manager.coin_profiles["KRW-BTC"])
-                grid_count = coin_config.get('grid_count', 20)
-                period_days = coin_config.get('price_range_days', 7)
-                title = f'{ticker} 가격 차트 ({period_days}일/그리드{grid_count}개)'
-            except Exception as e:
-                # 실제 사용된 기간 정보가 있으면 그것을 사용
+        # 자동 모드에서 최적화된 설정 표시
+        try:
+            if config.get('auto_trading_mode', False):
+                # coin_grid_manager에서 최적화된 설정 가져오기
+                try:
+                    if 'coin_grid_manager' in globals() and hasattr(coin_grid_manager, 'coin_profiles'):
+                        coin_config = coin_grid_manager.coin_profiles.get(ticker)
+                        if coin_config is None:
+                            coin_config = coin_grid_manager.coin_profiles.get("KRW-BTC", {})
+                        
+                        # 최적화된 설정 표시
+                        grid_count = coin_config.get('grid_count', 20)
+                        price_range_days = coin_config.get('price_range_days', 7)
+                        
+                        # 시간 단위로 변환
+                        if price_range_days < 1:
+                            timeframe_str = f"{int(price_range_days * 24)}시간"
+                        elif price_range_days * 24 < 24:
+                            timeframe_str = f"{int(price_range_days * 24)}시간"
+                        else:
+                            timeframe_str = f"{price_range_days}일"
+                        
+                        # 최적화 상태 표시
+                        last_opt = coin_config.get('last_optimization')
+                        opt_status = ""
+                        if last_opt:
+                            time_diff = (datetime.now() - last_opt).seconds
+                            if time_diff < 3600:  # 1시간 이내
+                                opt_status = " 🔥"
+                            else:
+                                opt_status = " ✅"
+                        
+                        title = f'{ticker} 차트 ({timeframe_str}/그리드{grid_count}개{opt_status})'
+                    else:
+                        title = f'{ticker} 가격 차트 (자동모드)'
+                except Exception as e:
+                    title = f'{ticker} 가격 차트 (자동모드)'
+                    print(f"차트 제목 생성 오류: {e}")
+            else:
+                # 수동 모드에서는 기존 방식
                 display_period = period
-                if ticker in chart_data and len(chart_data[ticker]) >= 6:
-                    actual_period = chart_data[ticker][5]
-                    if actual_period:
-                        display_period = actual_period
-                title = f'{ticker} 가격 차트 ({display_period})'
-        else:
-            # 수동 모드에서는 기존 방식
-            display_period = period
-            if ticker in chart_data and len(chart_data[ticker]) >= 6:
-                actual_period = chart_data[ticker][5]
-                if actual_period:
-                    display_period = actual_period
-            title = f'{ticker} 가격 차트 ({display_period})'
+                grid_count_info = ""
+                if 'chart_data' in globals() and ticker in chart_data:
+                    if len(chart_data[ticker]) >= 6:
+                        actual_period = chart_data[ticker][5]
+                        if actual_period:
+                            display_period = actual_period
+                    if len(chart_data[ticker]) >= 4:
+                        grid_count = chart_data[ticker][3]
+                        if grid_count > 0:
+                            grid_count_info = f"/그리드{grid_count}개"
+                
+                title = f'{ticker} 가격 차트 ({display_period}{grid_count_info})'
+        except Exception as e:
+            title = f'{ticker} 가격 차트'
+            print(f"차트 제목 오류: {e}")
         
         ax.set_title(title, fontsize=10)
         ax.set_xlabel('시간', fontsize=8)
@@ -6473,28 +7296,39 @@ def start_dashboard():
         
         # 실시간 현재 가격 표시
         try:
-            current_price = data_manager.get_current_price(ticker)
+            current_price = None
+            # data_manager가 존재하는지 확인
+            if 'data_manager' in globals() and hasattr(data_manager, 'get_current_price'):
+                current_price = data_manager.get_current_price(ticker)
+            
+            # data_manager에서 가져오지 못했으면 직접 API 호출
+            if not current_price:
+                current_price = pyupbit.get_current_price(ticker)
+            
             if current_price and len(df) > 0:
                 # 현재 가격 수평선 표시
                 ax.axhline(y=current_price, color='orange', linestyle='-', alpha=0.8, linewidth=2, label=f'현재가 ({current_price:,.0f})')
                 
                 # 차트 우측에 실시간 정보 표시
-                realtime_info = f'현재가: {current_price:,.0f}원\n시간: {datetime.now().strftime("%H:%M:%S")}'
+                realtime_info = f'현재가: {current_price:,.0f}원\\n시간: {datetime.now().strftime("%H:%M:%S")}'
                 
                 # 그리드와 현재 가격의 관계 정보 추가
-                if ticker in chart_data and len(chart_data[ticker]) >= 3:
-                    high_price, low_price, grid_levels = chart_data[ticker][:3]
-                    if grid_levels:
-                        # 현재 가격이 어느 그리드 영역에 있는지 표시
-                        grid_position = "범위외"
-                        if low_price <= current_price <= high_price:
-                            for i, level in enumerate(grid_levels):
-                                if current_price <= level:
-                                    grid_position = f"그리드 {i+1}/{len(grid_levels)}"
-                                    break
-                        
-                        price_ratio = ((current_price - low_price) / (high_price - low_price)) * 100 if high_price != low_price else 50
-                        realtime_info += f'\n위치: {grid_position} ({price_ratio:.1f}%)'
+                if 'chart_data' in globals() and ticker in chart_data and len(chart_data[ticker]) >= 3:
+                    try:
+                        high_price, low_price, grid_levels = chart_data[ticker][:3]
+                        if grid_levels:
+                            # 현재 가격이 어느 그리드 영역에 있는지 표시
+                            grid_position = "범위외"
+                            if low_price <= current_price <= high_price:
+                                for i, level in enumerate(grid_levels):
+                                    if current_price <= level:
+                                        grid_position = f"그리드 {i+1}/{len(grid_levels)}"
+                                        break
+                            
+                            price_ratio = ((current_price - low_price) / (high_price - low_price)) * 100 if high_price != low_price else 50
+                            realtime_info += f'\\n위치: {grid_position} ({price_ratio:.1f}%)'
+                    except:
+                        pass
                 
                 ax.text(0.98, 0.02, realtime_info, 
                        transform=ax.transAxes, 
@@ -6504,76 +7338,87 @@ def start_dashboard():
             print(f"실시간 가격 표시 오류: {e}")
         
         # 그리드 라인 그리기
-        if ticker in chart_data:
-            chart_info = chart_data[ticker]
-            if len(chart_info) >= 6:
-                high_price, low_price, grid_levels, grid_count_info, allocated_amount, actual_period = chart_info
-            elif len(chart_info) >= 5:
-                high_price, low_price, grid_levels, grid_count_info, allocated_amount = chart_info[:5]
-            else:
-                high_price, low_price, grid_levels = chart_info[:3]
-                grid_count_info = len(grid_levels) - 1 if grid_levels else 0
-                allocated_amount = 0
-            
-            # 그리드 라인 및 현재 가격과의 관계 표시
+        if 'chart_data' in globals() and ticker in chart_data:
             try:
-                current_price = data_manager.get_current_price(ticker)
-                for i, level in enumerate(grid_levels):
-                    # 현재 가격과 그리드 라인의 관계에 따라 색상 변경
-                    if current_price:
-                        if level > current_price:
-                            # 현재가보다 높은 그리드 (매도 영역) - 빨간색
-                            color = 'lightcoral'
-                            alpha = 0.6
-                        elif level < current_price:
-                            # 현재가보다 낮은 그리드 (매수 영역) - 초록색
-                            color = 'lightgreen'
-                            alpha = 0.6
+                chart_info = chart_data[ticker]
+                if len(chart_info) >= 6:
+                    high_price, low_price, grid_levels, grid_count_info, allocated_amount, actual_period = chart_info
+                elif len(chart_info) >= 5:
+                    high_price, low_price, grid_levels, grid_count_info, allocated_amount = chart_info[:5]
+                else:
+                    high_price, low_price, grid_levels = chart_info[:3]
+                    grid_count_info = len(grid_levels) - 1 if grid_levels else 0
+                    allocated_amount = 0
+                
+                # 그리드 라인 및 현재 가격과의 관계 표시
+                try:
+                    current_price = pyupbit.get_current_price(ticker)
+                    for i, level in enumerate(grid_levels):
+                        # 현재 가격과 그리드 라인의 관계에 따라 색상 변경
+                        if current_price:
+                            if level > current_price:
+                                # 현재가보다 높은 그리드 (매도 영역) - 빨간색
+                                color = 'lightcoral'
+                                alpha = 0.6
+                            elif level < current_price:
+                                # 현재가보다 낮은 그리드 (매수 영역) - 초록색
+                                color = 'lightgreen'
+                                alpha = 0.6
+                            else:
+                                # 현재가와 비슷한 그리드 - 노란색
+                                color = 'yellow'
+                                alpha = 0.8
                         else:
-                            # 현재가와 비슷한 그리드 - 노란색
-                            color = 'yellow'
-                            alpha = 0.8
-                    else:
-                        color = 'gray'
-                        alpha = 0.5
-                    
-                    ax.axhline(y=level, color=color, linestyle='--', alpha=alpha, linewidth=0.8)
-                    
-                    # 중요한 그리드 라인에 가격 표시
-                    if i % 3 == 0:  # 3번째마다 가격 표시
-                        ax.text(0.01, level/ax.get_ylim()[1]*0.95, f'{level:,.0f}', 
-                               transform=ax.transData, fontsize=7, alpha=0.8,
-                               verticalalignment='center', horizontalalignment='left')
+                            color = 'gray'
+                            alpha = 0.5
                         
+                        ax.axhline(y=level, color=color, linestyle='--', alpha=alpha, linewidth=0.8)
+                        
+                        # 중요한 그리드 라인에 가격 표시
+                        if i % 3 == 0:  # 3번째마다 가격 표시
+                            ax.text(0.01, level, f'{level:,.0f}', 
+                                   fontsize=7, alpha=0.8,
+                                   verticalalignment='center', horizontalalignment='left')
+                            
+                except Exception as e:
+                    # 실시간 가격 조회 실패시 기본 그리드 표시
+                    for level in grid_levels:
+                        ax.axhline(y=level, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
+                
+                ax.axhline(y=high_price, color='green', linestyle='-', alpha=0.8, linewidth=1, label=f'상한선 ({high_price:,.0f})')
+                ax.axhline(y=low_price, color='red', linestyle='-', alpha=0.8, linewidth=1, label=f'하한선 ({low_price:,.0f})')
+                
+                # 그리드 정보 표시
+                if grid_count_info > 0:
+                    grid_gap = (high_price - low_price) / grid_count_info if grid_count_info > 0 else 0
+                    info_text = f'그리드: {grid_count_info}개 | 간격: {grid_gap:,.0f}원'
+                    if allocated_amount > 0:
+                        amount_per_grid = allocated_amount / grid_count_info if grid_count_info > 0 else 0
+                        info_text += f'\\n총투자: {allocated_amount:,.0f}원 | 격당: {amount_per_grid:,.0f}원'
+                        
+                        # 분배 비율 표시 (총 투자금 대비)
+                        try:
+                            if 'coin_allocation_system' in globals() and hasattr(coin_allocation_system, 'get_total_allocated') and coin_allocation_system.get_total_allocated() > 0:
+                                total_allocated = coin_allocation_system.get_total_allocated()
+                                allocation_ratio = (allocated_amount / total_allocated) * 100 if total_allocated > 0 else 0
+                                info_text += f' | 분배: {allocation_ratio:.1f}%'
+                        except:
+                            pass
+                            
+                    ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
+                           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
+                           fontsize=8, verticalalignment='top', fontweight='bold')
             except Exception as e:
-                # 실시간 가격 조회 실패시 기본 그리드 표시
-                for level in grid_levels:
-                    ax.axhline(y=level, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
-            
-            ax.axhline(y=high_price, color='green', linestyle='-', alpha=0.8, linewidth=1, label=f'상한선 ({high_price:,.0f})')
-            ax.axhline(y=low_price, color='red', linestyle='-', alpha=0.8, linewidth=1, label=f'하한선 ({low_price:,.0f})')
-            
-            # 그리드 정보 표시
-            if grid_count_info > 0:
-                grid_gap = (high_price - low_price) / grid_count_info if grid_count_info > 0 else 0
-                info_text = f'그리드: {grid_count_info}개 | 간격: {grid_gap:,.0f}원'
-                if allocated_amount > 0:
-                    amount_per_grid = allocated_amount / grid_count_info if grid_count_info > 0 else 0
-                    info_text += f'\n총투자: {allocated_amount:,.0f}원 | 격당: {amount_per_grid:,.0f}원'
-                    
-                    # 분배 비율 표시 (총 투자금 대비)
-                    if hasattr(coin_allocation_system, 'get_total_allocated') and coin_allocation_system.get_total_allocated() > 0:
-                        total_allocated = coin_allocation_system.get_total_allocated()
-                        allocation_ratio = (allocated_amount / total_allocated) * 100 if total_allocated > 0 else 0
-                        info_text += f' | 분배: {allocation_ratio:.1f}%'
-                        
-                ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
-                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
-                       fontsize=8, verticalalignment='top', fontweight='bold')
+                print(f"그리드 라인 표시 오류 ({ticker}): {e}")
+                # 오류 발생시에도 기본 그리드 표시
+                if 'grid_levels' in locals() and grid_levels:
+                    for level in grid_levels:
+                        ax.axhline(y=level, color='gray', linestyle='--', alpha=0.3, linewidth=0.5)
 
         # 거래 기록 표시
         trade_points = {'buy': [], 'sell': [], 'hold_buy': [], 'hold_sell': []}
         try:
+            log_file = "trade_logs.json"
             with open(log_file, 'r', encoding='utf-8') as f:
                 logs = json.load(f)
             if ticker in logs:
@@ -6589,7 +7434,7 @@ def start_dashboard():
                         trade_time = pd.to_datetime(time_str)
                         
                         import re
-                        price_match = re.search(r'([\d,]+)원', str(price_str))
+                        price_match = re.search(r'([\\d,]+)원', str(price_str))
                         if price_match:
                             trade_price = float(price_match.group(1).replace(',', ''))
                         else: # 가격 정보가 없는 로그 (e.g., '시작')
@@ -6602,13 +7447,12 @@ def start_dashboard():
                             trade_points['hold_buy'].append(point_data)
                         elif '매도보류' in action:
                             trade_points['hold_sell'].append(point_data)
-                        elif '매수' in action:
+                        elif '매수' in action and '보류' not in action and '취소' not in action:
                             trade_points['buy'].append(point_data)
-                        elif '매도' in action:
+                        elif '매도' in action and '보류' not in action and '취소' not in action:
                             trade_points['sell'].append(point_data)
 
                     except (ValueError, TypeError) as e:
-                        print(f"로그 파싱 오류: {log} -> {e}")
                         continue
         except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             pass
@@ -6657,7 +7501,49 @@ def start_dashboard():
             "annot": annot
         }
 
-        canvas.draw_idle()
+        # 차트 다시 그리기
+        try:
+            canvas.draw_idle()
+            print(f"{ticker} 차트 업데이트 완료")
+        except Exception as e:
+            print(f"{ticker} 차트 그리기 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_hover(event):
+        if event.inaxes is None:
+            return
+
+        for ticker, ax in charts.items():
+            if event.inaxes == ax and hasattr(ax, 'hover_data'):
+                hover_data = ax.hover_data
+                annot = hover_data['annot']
+                found = False
+                
+                for scatter in hover_data['scatters']:
+                    cont, ind = scatter.contains(event)
+                    if cont:
+                        idx = ind['ind'][0]
+                        pos = scatter.get_offsets()[idx]
+                        annot.xy = pos
+                        
+                        point_info = ""
+                        for p in hover_data['points']:
+                            if abs(p['price'] - pos[1]) < 1e-6:
+                                point_info = p['info']
+                                break
+
+                        annot.set_text(point_info)
+                        annot.get_bbox_patch().set_alpha(0.8)
+                        annot.set_visible(True)
+                        canvas.draw_idle()
+                        found = True
+                        break
+                
+                if not found and annot.get_visible():
+                    annot.set_visible(False)
+                    canvas.draw_idle()
+
 
     # 실시간 거래 로그는 팝업으로 대체 (하단 프레임 제거)
 
@@ -6672,6 +7558,18 @@ def start_dashboard():
         else:
             return "Black.TLabel"
 
+    # 최적화 업데이트 콜백 함수
+    def optimization_update_callback(signal_type):
+        """최적화 업데이트 처리 콜백"""
+        if signal_type == "optimal_update":
+            print("🔄 최적화 업데이트 신호 수신")
+            try:
+                # GUI 스레드에서 실행되도록 after 사용
+                root.after(100, refresh_charts)
+                print("✅ 차트 새로고침 예약 완료")
+            except Exception as e:
+                print(f"❌ 최적화 업데이트 처리 오류: {e}")
+    
     def process_gui_queue():
         """GUI 큐 처리"""
         while not gui_queue.empty():
@@ -6803,8 +7701,66 @@ def start_dashboard():
     # 차트 업데이트 버튼
     def refresh_charts():
         current_period = period_combo.get()
+        print(f"🔄 차트 새로고침 시작 (기간: {current_period})")
+        
         for ticker in tickers:
-            update_chart(ticker, current_period)
+            try:
+                # 그리드 데이터 재생성 (항상 최신 데이터로 업데이트)
+                print(f"📊 {ticker} 그리드 데이터 생성/업데이트...")
+                
+                if config.get('auto_trading_mode', False):
+                    # 자동 모드: 최적화된 설정 사용
+                    try:
+                        if 'coin_grid_manager' in globals():
+                            # 최적 시간대와 그리드 수 계산
+                            optimal_timeframe, optimal_grid_count = coin_grid_manager.find_optimal_timeframe_and_grid(ticker)
+                            
+                            # 최적 가격 범위 계산
+                            high_price, low_price = calculate_price_range_hours(ticker, optimal_timeframe)
+                            
+                            if high_price and low_price and high_price > low_price:
+                                price_gap = (high_price - low_price) / optimal_grid_count
+                                grid_levels = [low_price + (price_gap * i) for i in range(optimal_grid_count + 1)]
+                                allocated_amount = 10000000 // len(tickers)
+                                
+                                timeframe_str = f"{optimal_timeframe}시간" if optimal_timeframe >= 1 else f"{int(optimal_timeframe * 60)}분"
+                                chart_data[ticker] = (high_price, low_price, grid_levels, optimal_grid_count, allocated_amount, timeframe_str)
+                                
+                                print(f"✅ {ticker} 최적화된 그리드 생성 완료 ({timeframe_str} 구간, {optimal_grid_count}개 그리드)")
+                    except Exception as e:
+                        print(f"최적화된 그리드 생성 오류 ({ticker}): {e}")
+                        # 실패시 기본 설정 사용
+                        try:
+                            high_price, low_price = calculate_price_range(ticker, "4시간")
+                            if high_price and low_price:
+                                grid_count = 20
+                                price_gap = (high_price - low_price) / grid_count
+                                grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
+                                allocated_amount = 10000000 // len(tickers)
+                                chart_data[ticker] = (high_price, low_price, grid_levels, grid_count, allocated_amount, "4시간")
+                        except Exception as e2:
+                            print(f"기본 그리드 생성도 실패 ({ticker}): {e2}")
+                else:
+                    # 수동 모드
+                    try:
+                        high_price, low_price = calculate_price_range(ticker, "7일")
+                        if high_price and low_price:
+                            grid_count = 20
+                            price_gap = (high_price - low_price) / grid_count
+                            grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
+                            allocated_amount = 10000000 // len(tickers)
+                            chart_data[ticker] = (high_price, low_price, grid_levels, grid_count, allocated_amount, current_period)
+                            print(f"✅ {ticker} 수동 모드 그리드 생성 완료 (그리드: {grid_count}개)")
+                    except Exception as e:
+                        print(f"수동 모드 그리드 생성 오류 ({ticker}): {e}")
+                
+                # 차트 업데이트
+                update_chart(ticker, current_period)
+                
+            except Exception as e:
+                print(f"차트 새로고침 오류 ({ticker}): {e}")
+        
+        print(f"✅ 차트 새로고침 완료")
     
     # 차트 상태 표시 및 컨트롤
     chart_status_frame = ttk.Frame(mid_frame)
@@ -6821,33 +7777,128 @@ def start_dashboard():
 
     # 실시간 차트 자동 새로고침 스케줄러
     def auto_refresh_charts():
-        """실시간 차트 자동 새로고침 (10초마다)"""
+        """실시간 차트 자동 새로고침 (5초마다)"""
         try:
             current_time = datetime.now().strftime("%H:%M:%S")
             
-            # 거래가 활성화되어 있을 때만 차트 자동 업데이트
-            if active_trades:
-                current_period = period_combo.get()
-                updated_count = 0
-                for ticker in active_trades.keys():
-                    if ticker in charts:
+            # 모든 차트를 항상 업데이트 (거래 활성화 여부와 관계없이)
+            current_period = period_combo.get()
+            updated_count = 0
+            
+            # 그리드 데이터가 없는 경우 또는 자동 모드에서 최적화된 설정으로 생성
+            for ticker in tickers:
+                should_update = False
+                
+                if ticker not in chart_data or not chart_data[ticker]:
+                    should_update = True
+                    print(f"🔄 {ticker} 그리드 데이터 자동 생성...")
+                elif config.get('auto_trading_mode', False):
+                    # 자동 모드에서는 최적화된 설정 확인
+                    try:
+                        coin_config = coin_grid_manager.coin_profiles.get(ticker)
+                        if coin_config and 'last_optimization' in coin_config:
+                            last_opt = coin_config['last_optimization']
+                            # 차트 데이터가 최적화보다 오래된 경우 업데이트
+                            if isinstance(last_opt, datetime):
+                                chart_timestamp = getattr(chart_data[ticker], 'timestamp', None)
+                                if not chart_timestamp or last_opt > chart_timestamp:
+                                    should_update = True
+                                    print(f"🔄 {ticker} 최적화된 설정으로 그리드 데이터 업데이트...")
+                    except Exception as e:
+                        print(f"최적화 상태 확인 오류 ({ticker}): {e}")
+                
+                if should_update:
+                    try:
+                        if config.get('auto_trading_mode', False) and 'coin_grid_manager' in globals():
+                            # 자동 모드: 최적화된 설정 사용
+                            try:
+                                optimal_timeframe, optimal_grid_count = coin_grid_manager.find_optimal_timeframe_and_grid(ticker)
+                                high_price, low_price = calculate_price_range_hours(ticker, optimal_timeframe)
+                                grid_count = optimal_grid_count
+                                period_str = f"{optimal_timeframe}시간"
+                                
+                                # XRP 디버깅
+                                if ticker == 'KRW-XRP':
+                                    print(f"🔍 XRP 최적화 결과: {optimal_timeframe}시간, {optimal_grid_count}개 그리드")
+                                    print(f"🔍 XRP 가격범위: {high_price:,.0f} ~ {low_price:,.0f}")
+                            except Exception as e:
+                                print(f"❌ {ticker} 최적화 실패: {e}")
+                                # 기본 설정으로 폴백
+                                high_price, low_price = calculate_price_range(ticker, "4시간")
+                                grid_count = 20
+                                period_str = "4시간"
+                        else:
+                            # 수동 모드: 기본 설정
+                            high_price, low_price = calculate_price_range(ticker, "7일")
+                            grid_count = 20
+                            period_str = current_period
+                        
+                        if high_price and low_price and high_price > low_price:
+                            price_gap = (high_price - low_price) / grid_count
+                            grid_levels = [low_price + (price_gap * i) for i in range(grid_count + 1)]
+                            allocated_amount = 10000000 // len(tickers)
+                            
+                            chart_data[ticker] = (high_price, low_price, grid_levels, grid_count, allocated_amount, period_str)
+                            # 타임스탬프 추가
+                            chart_data[ticker].timestamp = datetime.now()
+                            
+                            # XRP 디버깅: 그리드 데이터 생성 확인
+                            if ticker == 'KRW-XRP':
+                                print(f"✅ XRP 그리드 데이터 생성 완료:")
+                                print(f"  - 가격범위: {high_price:,.0f} ~ {low_price:,.0f}")
+                                print(f"  - 그리드 수: {grid_count}개, 간격: {price_gap:,.0f}")
+                                print(f"  - 그리드 레벨 수: {len(grid_levels)}개")
+                        else:
+                            print(f"❌ {ticker} 그리드 데이터 생성 실패: high={high_price}, low={low_price}")
+                            
+                    except Exception as e:
+                        print(f"그리드 생성 오류 ({ticker}): {e}")
+            
+            # 차트 업데이트
+            for ticker in tickers:
+                if ticker in charts:
+                    try:
+                        # XRP 디버깅: 차트 업데이트 시작
+                        if ticker == 'KRW-XRP':
+                            print(f"🔄 XRP 차트 업데이트 시작...")
+                            if ticker in chart_data and chart_data[ticker]:
+                                print(f"  ✅ XRP 그리드 데이터 존재: {len(chart_data[ticker])}개 요소")
+                            else:
+                                print(f"  ❌ XRP 그리드 데이터 없음")
+                        
                         # 실시간 차트 업데이트 (그리드와 현재 가격 포함)
                         update_chart(ticker, current_period)
                         updated_count += 1
+                        
+                        # XRP 디버깅: 차트 업데이트 완료
+                        if ticker == 'KRW-XRP':
+                            print(f"  ✅ XRP 차트 업데이트 완료")
+                    except Exception as e:
+                        print(f"❌ 차트 업데이트 오류 ({ticker}): {e}")
+                        # XRP의 경우 더 자세한 오류 정보 출력
+                        if ticker == 'KRW-XRP':
+                            import traceback
+                            print(f"  XRP 오류 상세:\n{traceback.format_exc()}")
+                else:
+                    print(f"❌ {ticker} 차트가 charts에 없음")
                 
-                # 상태 업데이트
+            # 상태 업데이트
+            if updated_count > 0:
                 chart_status_label.config(text=f"🔄 실시간 업데이트: 활성 ({updated_count}개 코인) - {current_time}", 
                                         foreground='green')
+            else:
+                chart_status_label.config(text=f"❌ 차트 업데이트 실패 - {current_time}", 
+                                        foreground='red')
                         
             # 비활성화 상태에서도 주기적으로 현재 가격 업데이트 (30초마다)
-            elif hasattr(auto_refresh_charts, 'update_count'):
+            if hasattr(auto_refresh_charts, 'update_count'):
                 auto_refresh_charts.update_count += 1
                 if auto_refresh_charts.update_count >= 3:  # 30초마다 (10초 * 3)
                     auto_refresh_charts.update_count = 0
                     current_period = period_combo.get()
-                    selected_tickers = [ticker for ticker, var in ticker_vars.items() if var.get()]
+                    # 모든 티커의 차트를 업데이트 (선택 여부와 관계없이)
                     updated_count = 0
-                    for ticker in selected_tickers:
+                    for ticker in tickers:
                         if ticker in charts:
                             update_chart(ticker, current_period)
                             updated_count += 1
@@ -6866,8 +7917,8 @@ def start_dashboard():
             print(f"차트 자동 새로고침 오류: {e}")
             chart_status_label.config(text=f"❌ 업데이트 오류: {current_time}", foreground='red')
         finally:
-            # 10초 후 다시 새로고침
-            root.after(10000, auto_refresh_charts)
+            # 5초 후 다시 새로고침 (실시간 업데이트 강화)
+            root.after(5000, auto_refresh_charts)
     
     # 자동 백업 스케줄러 시작
     def periodic_backup_check():
@@ -6888,10 +7939,19 @@ def start_dashboard():
     root.after(5000, periodic_backup_check)  # 5초 후 시작
     
     # 실시간 차트 자동 새로고침 시작
-    root.after(15000, auto_refresh_charts)  # 15초 후 시작 (초기 로드 이후)
+    root.after(5000, auto_refresh_charts)  # 5초 후 시작 (초기 로드 이후)
     
     # 초기 차트 로드
     root.after(1000, refresh_charts)
+    
+    # 자동 최적화 스케줄러 시작 (자동 모드가 활성화된 경우)
+    if config.get('auto_trading_mode', False) and config.get('auto_optimization', True):
+        try:
+            auto_optimization_scheduler = AutoOptimizationScheduler()
+            auto_optimization_scheduler.start_auto_optimization(optimization_update_callback)
+            print("🚀 자동 최적화 스케줄러 시작됨")
+        except Exception as e:
+            print(f"자동 최적화 스케줄러 시작 오류: {e}")
     
     root.mainloop()
 
