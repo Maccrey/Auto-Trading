@@ -976,6 +976,8 @@ class CoinSpecificGridManager:
 # 완전 자동 거래 시스템
 class AutoTradingSystem:
     def __init__(self):
+        self.timeframe_update_time = {}  # 시간대 마지막 업데이트 시간 추가
+        self.optimal_timeframes = {}  # 코인별 최적 시간대 저장 추가
         self.risk_profiles = {
             "보수적": {
                 "max_grid_count": 15,
@@ -1998,11 +2000,17 @@ class AutoOptimizationScheduler:
     
     def _perform_optimization(self, update_callback):
         """실제 최적화 수행"""
+        global coin_grid_manager
         try:
             print("🚀 자동 최적화 시작...")
             
             # 코인별 그리드 최적화 실행
-            results = coin_grid_manager.force_optimization_for_all_coins()
+            if hasattr(coin_grid_manager, 'force_optimization_for_all_coins'):
+                results = coin_grid_manager.force_optimization_for_all_coins()
+            else:
+                print("❌ force_optimization_for_all_coins 메서드를 찾을 수 없습니다. 새 인스턴스를 생성합니다.")
+                coin_grid_manager = CoinSpecificGridManager()
+                results = coin_grid_manager.force_optimization_for_all_coins()
             
             if results:
                 print("✅ 자동 최적화 완료")
@@ -3469,6 +3477,46 @@ def backup_corrupted_file(file_path):
     except Exception as e:
         print(f"손상된 파일 백업 오류: {e}")
 
+# 중복 로그 방지를 위한 캐시
+last_log_entries = {}
+
+def add_log_to_gui(log_entry):
+    """실시간 로그 팝업 업데이트 (중복 방지 포함)"""
+    global current_log_tree, current_log_popup, last_log_entries
+    
+    # 팝업이 열려있고 유효할 때만 실시간 업데이트
+    if (current_log_popup and current_log_tree and 
+        hasattr(current_log_popup, 'winfo_exists') and 
+        current_log_popup.winfo_exists()):
+        
+        try:
+            ticker = log_entry.get('ticker', 'SYSTEM')
+            action = log_entry.get('action', '')
+            price_info = log_entry.get('price', '')
+            log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            
+            # 중복 로그 체크 (같은 시간, 티커, 액션, 가격이면 중복으로 판단)
+            log_key = f"{ticker}_{action}_{price_info}_{log_time}"
+            if log_key in last_log_entries:
+                print(f"⚠️ 중복 로그 감지 및 스킵: {ticker} - {action}")
+                return
+            
+            # 중복이 아니면 캐시에 저장 (최근 10개만 유지)
+            last_log_entries[log_key] = True
+            if len(last_log_entries) > 10:
+                # 가장 오래된 항목 제거
+                oldest_key = next(iter(last_log_entries))
+                del last_log_entries[oldest_key]
+            
+            # 새 로그를 트리뷰에 추가
+            current_log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
+            
+            # 최신 로그가 보이도록 스크롤
+            current_log_tree.yview_moveto(1)
+            
+        except Exception as e:
+            print(f"로그 팝업 업데이트 오류: {e}")
+
 def log_trade(ticker, action, price, reason=None, details=None):
     """거래 로그 기록 (개선된 안전 버전 - 매수/매도 이유 포함)"""
     entry = {
@@ -3493,6 +3541,23 @@ def log_trade(ticker, action, price, reason=None, details=None):
         
         # 안전한 저장
         if safe_json_save(log_file, data):
+            # 실시간 로그 팝업 업데이트 (매수/매도 거래 포함)
+            log_entry_for_gui = {
+                'ticker': ticker,
+                'time': entry['time'],
+                'action': entry['action'],
+                'price': entry['price']
+            }
+            add_log_to_gui(log_entry_for_gui)
+            
+            # 매수/매도 거래 시 차트 업데이트 플래그 설정
+            if ('매수' in action or '매도' in action) and '보류' not in action:
+                print(f"🔄 {ticker} 거래 발생 - 차트 업데이트 필요: {action}")
+                # 차트 업데이트가 필요함을 표시하는 전역 플래그 설정
+                if 'chart_update_needed' not in globals():
+                    globals()['chart_update_needed'] = {}
+                globals()['chart_update_needed'][ticker] = True
+            
             return entry
         else:
             print(f"로그 저장 실패: {ticker} - {action}")
@@ -5993,7 +6058,7 @@ def start_dashboard():
     start_tts_worker()
 
     root = tk.Tk()
-    root.title("그리드 투자 자동매매 대시보드 v3.0")
+    root.title("그리드 투자 자동매매 대시보드 v3.1")
     root.geometry("1400x900")
 
     def on_closing():
@@ -6084,7 +6149,7 @@ def start_dashboard():
         
         # 상세 정보
         detail_labels[ticker] = {
-            'profit': ttk.Label(ticker_frame, text="총수익: 0원", style="Gray.TLabel"),
+            'profit': ttk.Label(ticker_frame, text="보유코인수익: 0원", style="Gray.TLabel"),
             'profit_rate': ttk.Label(ticker_frame, text="(0.00%)", style="Gray.TLabel"),
             'realized_profit': ttk.Label(ticker_frame, text="실현수익: 0원", style="Gray.TLabel"),
             'realized_profit_rate': ttk.Label(ticker_frame, text="(0.00%)", style="Gray.TLabel"),
@@ -6390,29 +6455,6 @@ def start_dashboard():
         
         return log_tree_popup
 
-    def add_log_to_gui(log_entry):
-        """실시간 로그 팝업 업데이트"""
-        global current_log_tree, current_log_popup
-        
-        # 팝업이 열려있고 유효할 때만 실시간 업데이트
-        if (current_log_popup and current_log_tree and 
-            hasattr(current_log_popup, 'winfo_exists') and 
-            current_log_popup.winfo_exists()):
-            
-            try:
-                ticker = log_entry.get('ticker', 'SYSTEM')
-                action = log_entry.get('action', '')
-                price_info = log_entry.get('price', '')
-                log_time = log_entry.get('time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                
-                # 새 로그를 트리뷰에 추가
-                current_log_tree.insert('', 'end', values=(log_time, ticker, action, price_info))
-                
-                # 최신 로그가 보이도록 스크롤
-                current_log_tree.yview_moveto(1)
-                
-            except Exception as e:
-                print(f"로그 팝업 업데이트 오류: {e}")
 
     def load_previous_trading_state():
         """이전 거래 상태를 로드하여 이어서 거래할 수 있도록 함"""
@@ -6599,9 +6641,7 @@ def start_dashboard():
                     grid_entry.insert(0, str(new_grid_count))
                     grid_count = new_grid_count # 업데이트된 그리드 수 사용
                     log_entry = log_trade(representative_ticker, '정보', f'{period} 기준, 자동 계산된 그리드: {new_grid_count}개')
-                    if log_entry:
-                        log_entry['ticker'] = representative_ticker
-                        add_log_to_gui(log_entry)
+                    # log_trade 함수가 이미 add_log_to_gui를 호출하므로 중복 호출 제거
                 else:
                     messagebox.showwarning("경고", f"{representative_ticker}의 가격 범위 계산에 실패하여 자동 그리드 계산을 중단합니다.")
                     return
@@ -6660,8 +6700,16 @@ def start_dashboard():
     # 최적화 강제 실행 함수
     def force_optimization():
         """최적화를 강제로 실행"""
+        global coin_grid_manager
         try:
-            results = coin_grid_manager.force_optimization_for_all_coins()
+            # 인스턴스에 메서드가 있는지 확인
+            if hasattr(coin_grid_manager, 'force_optimization_for_all_coins'):
+                results = coin_grid_manager.force_optimization_for_all_coins()
+            else:
+                print("❌ force_optimization_for_all_coins 메서드를 찾을 수 없습니다.")
+                # 새로운 인스턴스 생성 시도
+                coin_grid_manager = CoinSpecificGridManager()
+                results = coin_grid_manager.force_optimization_for_all_coins()
             
             # 차트 업데이트 트리거
             for ticker in results.keys():
@@ -6707,9 +6755,7 @@ def start_dashboard():
                     grid_entry.delete(0, tk.END)
                     grid_entry.insert(0, str(new_grid_count))
                     log_entry = log_trade(representative_ticker, '정보', f'{period} 기준, 자동 계산된 그리드: {new_grid_count}개')
-                    if log_entry:
-                        log_entry['ticker'] = representative_ticker
-                        add_log_to_gui(log_entry)
+                    # log_trade 함수가 이미 add_log_to_gui를 호출하므로 중복 호출 제거
                     
                     # Update chart data and refresh the chart
                     price_gap = (high_price - low_price) / new_grid_count
@@ -6719,9 +6765,7 @@ def start_dashboard():
                     update_chart(representative_ticker, period)
                 else:
                     log_entry = log_trade(representative_ticker, '오류', f'{period} 기준 가격 범위 계산 실패')
-                    if log_entry:
-                        log_entry['ticker'] = representative_ticker
-                        add_log_to_gui(log_entry)
+                    # log_trade 함수가 이미 add_log_to_gui를 호출하므로 중복 호출 제거
             except Exception as e:
                 print(f"그리드 자동 계산 오류: {e}")
 
@@ -6791,7 +6835,7 @@ def start_dashboard():
         # 2. 각 티커별 상세 정보 초기화
         # 2. 각 티커별 상세 정보 초기화 (이 부분은 이미 clear_all_data 함수 내에 있으므로 중복 제거)
         for ticker in tickers:
-            detail_labels[ticker]['profit'].config(text="총수익: 0원", style="Gray.TLabel")
+            detail_labels[ticker]['profit'].config(text="보유코인수익: 0원", style="Gray.TLabel")
             detail_labels[ticker]['profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
             detail_labels[ticker]['realized_profit'].config(text="실현수익: 0원", style="Gray.TLabel")
             detail_labels[ticker]['realized_profit_rate'].config(text="(0.00%)", style="Gray.TLabel")
@@ -7391,17 +7435,38 @@ def start_dashboard():
                 # 그리드 정보 표시
                 if grid_count_info > 0:
                     grid_gap = (high_price - low_price) / grid_count_info if grid_count_info > 0 else 0
-                    info_text = f'그리드: {grid_count_info}개 | 간격: {grid_gap:,.0f}원'
+                    
+                    # 현재 사용 중인 timeframe 정보 가져오기
+                    current_timeframe = "1시간"  # 기본값
+                    try:
+                        if hasattr(auto_trading_system, 'optimal_timeframes') and ticker in auto_trading_system.optimal_timeframes:
+                            timeframe_hours = auto_trading_system.optimal_timeframes[ticker]
+                            if timeframe_hours == 0.5:
+                                current_timeframe = "30분"
+                            elif timeframe_hours == 1:
+                                current_timeframe = "1시간"
+                            elif timeframe_hours == 2:
+                                current_timeframe = "2시간"
+                            elif timeframe_hours == 4:
+                                current_timeframe = "4시간"
+                            elif timeframe_hours == 12:
+                                current_timeframe = "12시간"
+                            else:
+                                current_timeframe = f"{timeframe_hours}시간"
+                    except:
+                        pass
+                    
+                    info_text = f"({current_timeframe}/그리드{grid_count_info}개) | 간격: {grid_gap:,.0f}원"
                     if allocated_amount > 0:
                         amount_per_grid = allocated_amount / grid_count_info if grid_count_info > 0 else 0
-                        info_text += f'\\n총투자: {allocated_amount:,.0f}원 | 격당: {amount_per_grid:,.0f}원'
+                        info_text += f"\n총투자: {allocated_amount:,.0f}원 | 격당: {amount_per_grid:,.0f}원"
                         
                         # 분배 비율 표시 (총 투자금 대비)
                         try:
                             if 'coin_allocation_system' in globals() and hasattr(coin_allocation_system, 'get_total_allocated') and coin_allocation_system.get_total_allocated() > 0:
                                 total_allocated = coin_allocation_system.get_total_allocated()
                                 allocation_ratio = (allocated_amount / total_allocated) * 100 if total_allocated > 0 else 0
-                                info_text += f' | 분배: {allocation_ratio:.1f}%'
+                                info_text += f" | 분배: {allocation_ratio:.1f}%"
                         except:
                             pass
                             
@@ -7418,10 +7483,17 @@ def start_dashboard():
         # 거래 기록 표시
         trade_points = {'buy': [], 'sell': [], 'hold_buy': [], 'hold_sell': []}
         try:
-            log_file = "trade_logs.json"
+            log_file = "data/trade_logs.json"
             with open(log_file, 'r', encoding='utf-8') as f:
                 logs = json.load(f)
+            
+            # 디버깅: 로그 파일 내용 확인  
+            print(f"📊 {ticker} 로그 파일 확인: 총 {len(logs)} 개 티커")
+            
+            # 실제 거래 로그만 처리
+            
             if ticker in logs:
+                print(f"📊 {ticker} 로그 개수: {len(logs[ticker])}")
                 for log in logs[ticker]:
                     action = log.get('action', '')
                     time_str = log.get('time')
@@ -7434,58 +7506,84 @@ def start_dashboard():
                         trade_time = pd.to_datetime(time_str)
                         
                         import re
-                        price_match = re.search(r'([\\d,]+)원', str(price_str))
+                        # 더 포괄적인 가격 매칭 패턴
+                        price_match = re.search(r'([0-9,]+)원', str(price_str))
                         if price_match:
                             trade_price = float(price_match.group(1).replace(',', ''))
-                        else: # 가격 정보가 없는 로그 (e.g., '시작')
+                        else: 
+                            # 가격 정보가 없는 로그는 스킵
+                            print(f"📊 {ticker} 가격 정보 없는 로그 스킵: {action} - {price_str}")
                             continue
 
                         info_text = f"{log['action']}: {log['price']}"
                         point_data = {'time': trade_time, 'price': trade_price, 'info': info_text}
 
-                        if '매수보류' in action:
+                        # 데모/실거래 구분없이 매수/매도 액션 처리
+                        clean_action = action.replace('데모 ', '').replace('실거래 ', '')
+                        
+                        if '매수보류' in clean_action or ('매수' in clean_action and '보류' in clean_action):
                             trade_points['hold_buy'].append(point_data)
-                        elif '매도보류' in action:
+                            print(f"📊 {ticker} 매수보류 포인트 추가: {action} -> {trade_price:,}원")
+                        elif '매도보류' in clean_action or ('매도' in clean_action and '보류' in clean_action):
                             trade_points['hold_sell'].append(point_data)
-                        elif '매수' in action and '보류' not in action and '취소' not in action:
+                            print(f"📊 {ticker} 매도보류 포인트 추가: {action} -> {trade_price:,}원")
+                        elif '매수' in clean_action and '보류' not in clean_action and '취소' not in clean_action:
                             trade_points['buy'].append(point_data)
-                        elif '매도' in action and '보류' not in action and '취소' not in action:
+                            print(f"📊 {ticker} 매수 포인트 추가: {action} -> {trade_price:,}원")
+                        elif '매도' in clean_action and '보류' not in clean_action and '취소' not in clean_action:
                             trade_points['sell'].append(point_data)
+                            print(f"📊 {ticker} 매도 포인트 추가: {action} -> {trade_price:,}원")
 
                     except (ValueError, TypeError) as e:
                         continue
         except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
-            pass
+            print(f"📊 {ticker} 로그 파일 읽기 오류")
+
+        # 디버깅: 거래 포인트 수 확인
+        total_points = len(trade_points['buy']) + len(trade_points['sell']) + len(trade_points['hold_buy']) + len(trade_points['hold_sell'])
+        print(f"📊 {ticker} 거래 포인트: 매수({len(trade_points['buy'])}), 매도({len(trade_points['sell'])}), 매수보류({len(trade_points['hold_buy'])}), 매도보류({len(trade_points['hold_sell'])})")
 
         scatters = []
         all_trade_points = []
 
-        # 매수/매도/보류 표기
+        # 매수/매도/보류 표기 (향상된 가시성)
         if trade_points['buy']:
             buy_times = [p['time'] for p in trade_points['buy']]
             buy_prices = [p['price'] for p in trade_points['buy']]
-            scatters.append(ax.scatter(buy_times, buy_prices, color='blue', marker='^', s=60, zorder=5, label='매수'))
+            # 매수 포인트: 더 큰 파란색 삼각형 (위쪽)
+            scatters.append(ax.scatter(buy_times, buy_prices, color='#0066FF', marker='^', 
+                                     s=100, zorder=6, label='매수', edgecolors='white', linewidth=2))
             all_trade_points.extend(trade_points['buy'])
 
         if trade_points['sell']:
             sell_times = [p['time'] for p in trade_points['sell']]
             sell_prices = [p['price'] for p in trade_points['sell']]
-            scatters.append(ax.scatter(sell_times, sell_prices, color='red', marker='v', s=60, zorder=5, label='매도'))
+            # 매도 포인트: 더 큰 빨간색 삼각형 (아래쪽)
+            scatters.append(ax.scatter(sell_times, sell_prices, color='#FF3333', marker='v', 
+                                     s=100, zorder=6, label='매도', edgecolors='white', linewidth=2))
             all_trade_points.extend(trade_points['sell'])
         
         if trade_points['hold_buy']:
             hold_buy_times = [p['time'] for p in trade_points['hold_buy']]
             hold_buy_prices = [p['price'] for p in trade_points['hold_buy']]
-            scatters.append(ax.scatter(hold_buy_times, hold_buy_prices, color='cyan', marker='>', s=40, zorder=4, label='매수보류'))
+            # 매수보류 포인트: 연한 파란색 원형
+            scatters.append(ax.scatter(hold_buy_times, hold_buy_prices, color='#66CCFF', marker='o', 
+                                     s=50, zorder=4, label='매수보류', edgecolors='blue', linewidth=1, alpha=0.8))
             all_trade_points.extend(trade_points['hold_buy'])
 
         if trade_points['hold_sell']:
             hold_sell_times = [p['time'] for p in trade_points['hold_sell']]
             hold_sell_prices = [p['price'] for p in trade_points['hold_sell']]
-            scatters.append(ax.scatter(hold_sell_times, hold_sell_prices, color='magenta', marker='<', s=40, zorder=4, label='매도보류'))
+            # 매도보류 포인트: 연한 빨간색 원형
+            scatters.append(ax.scatter(hold_sell_times, hold_sell_prices, color='#FF9999', marker='o', 
+                                     s=50, zorder=4, label='매도보류', edgecolors='red', linewidth=1, alpha=0.8))
             all_trade_points.extend(trade_points['hold_sell'])
         
-        ax.legend(fontsize=8)
+        # 범례를 더 잘 보이게 표시
+        if scatters:  # 거래 포인트가 있을 때만 범례 표시
+            legend = ax.legend(fontsize=9, loc='upper left', framealpha=0.9, 
+                              fancybox=True, shadow=True)
+            legend.get_frame().set_facecolor('white')
         ax.grid(True, alpha=0.3)
         
         # Annotation 객체 생성
@@ -7638,8 +7736,14 @@ def start_dashboard():
                     profit_style = get_profit_color_style(profit)
                     realized_profit_style = get_profit_color_style(total_realized_profit)
                     
-                    # profit는 실현수익 + 평가수익의 총합이므로 "총수익"으로 표시
-                    detail_labels[ticker]['profit'].config(text=f"총수익: {profit:,.0f}원", style=profit_style)
+                    # 보유코인이 없으면 보유코인수익은 0으로 표시
+                    if coin_qty <= 0:
+                        profit = 0
+                        profit_percent = 0.0
+                        profit_style = "Gray.TLabel"
+                    
+                    # profit는 실현수익 + 평가수익의 총합이므로 "보유코인수익"으로 표시
+                    detail_labels[ticker]['profit'].config(text=f"보유코인수익: {profit:,.0f}원", style=profit_style)
                     detail_labels[ticker]['profit_rate'].config(text=f"({profit_percent:+.2f}%)", style=profit_style)
                     detail_labels[ticker]['realized_profit'].config(text=f"실현수익: {total_realized_profit:,.0f}원", style=realized_profit_style)
                     detail_labels[ticker]['realized_profit_rate'].config(text=f"({realized_profit_percent:+.2f}%)", style=realized_profit_style)
@@ -7785,6 +7889,13 @@ def start_dashboard():
             current_period = period_combo.get()
             updated_count = 0
             
+            # 거래 발생으로 인한 강제 업데이트 확인
+            if 'chart_update_needed' in globals():
+                for ticker, needs_update in globals()['chart_update_needed'].items():
+                    if needs_update:
+                        print(f"🔄 {ticker} 거래 발생으로 인한 강제 차트 업데이트")
+                        globals()['chart_update_needed'][ticker] = False  # 플래그 리셋
+            
             # 그리드 데이터가 없는 경우 또는 자동 모드에서 최적화된 설정으로 생성
             for ticker in tickers:
                 should_update = False
@@ -7839,8 +7950,6 @@ def start_dashboard():
                             allocated_amount = 10000000 // len(tickers)
                             
                             chart_data[ticker] = (high_price, low_price, grid_levels, grid_count, allocated_amount, period_str)
-                            # 타임스탬프 추가
-                            chart_data[ticker].timestamp = datetime.now()
                             
                             # XRP 디버깅: 그리드 데이터 생성 확인
                             if ticker == 'KRW-XRP':
