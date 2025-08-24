@@ -951,6 +951,302 @@
                 "current_price": "159,394,000원",
                 "grid_level": "5/11"
             }
+        },
+        {
+            "time": "2025-08-24 22:19:04",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,433,000원",
+            "reason": "상승 추세 지속으로 그리드 6 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,386,400원",
+                "new_target": "159,433,000원",
+                "current_price": "159,450,000원",
+                "grid_level": "6/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:41",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,479,600원",
+            "reason": "상승 추세 지속으로 그리드 7 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,433,000원",
+                "new_target": "159,479,600원",
+                "current_price": "159,480,000원",
+                "grid_level": "7/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:22:06",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,526,200원",
+            "reason": "상승 추세 지속으로 그리드 8 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,479,600원",
+                "new_target": "159,526,200원",
+                "current_price": "159,527,000원",
+                "grid_level": "8/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:22:12",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 159,526,200원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 8/11 도달",
+            "details": "이전가격: 159,527,000원 → 현재가격: 159,520,000원 (그리드가격: 159,526,200원)"
+        },
+        {
+            "time": "2025-08-24 22:26:43",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,479,600원"
+        },
+        {
+            "time": "2025-08-24 22:26:45",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,433,000원"
+        },
+        {
+            "time": "2025-08-24 22:29:36",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,386,400원"
+        },
+        {
+            "time": "2025-08-24 22:29:49",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 159,526,200원 (0.000220개) 순수익: 54원",
+            "reason": "그리드 레벨 8 하락 확인",
+            "details": {
+                "buy_price": "159,200,000원",
+                "sell_price": "159,526,200원",
+                "grid_level": "8/11",
+                "confirmation_price": "159,366,674원",
+                "current_price": "159,356,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "54원",
+                "quantity": "0.000220개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:30:26",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,339,800원"
+        },
+        {
+            "time": "2025-08-24 22:39:55",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 159,339,800원 (0.000220개)",
+            "reason": "그리드 레벨 4 반등 확인",
+            "details": {
+                "grid_price": "159,339,800원",
+                "confirmation_price": "159,499,140원",
+                "current_price": "159,531,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "35,047원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:39:55",
+            "action": "데모 매도보류",
+            "price": "목표가 159,386,400원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "159,339,800원",
+                "target_price": "159,386,400원",
+                "current_price": "159,531,000원",
+                "grid_level": "5/11",
+                "quantity": "0.000220개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:39:57",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,433,000원",
+            "reason": "상승 추세 지속으로 그리드 6 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,386,400원",
+                "new_target": "159,433,000원",
+                "current_price": "159,531,000원",
+                "grid_level": "6/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:39:59",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 159,479,600원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 7/11 도달",
+            "details": "이전가격: 159,531,000원 → 현재가격: 159,477,000원 (그리드가격: 159,479,600원)"
+        },
+        {
+            "time": "2025-08-24 22:40:10",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,479,600원",
+            "reason": "상승 추세 지속으로 그리드 7 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,433,000원",
+                "new_target": "159,479,600원",
+                "current_price": "159,530,000원",
+                "grid_level": "7/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:40:12",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,526,200원",
+            "reason": "상승 추세 지속으로 그리드 8 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,479,600원",
+                "new_target": "159,526,200원",
+                "current_price": "159,530,000원",
+                "grid_level": "8/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:40:52",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,433,000원"
+        },
+        {
+            "time": "2025-08-24 22:41:02",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,386,400원"
+        },
+        {
+            "time": "2025-08-24 22:47:22",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 159,386,400원 (0.000220개)",
+            "reason": "그리드 레벨 5 반등 확인",
+            "details": {
+                "grid_price": "159,386,400원",
+                "confirmation_price": "159,545,786원",
+                "current_price": "159,548,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "35,047원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:47:22",
+            "action": "데모 매도보류",
+            "price": "목표가 159,433,000원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "159,386,400원",
+                "target_price": "159,433,000원",
+                "current_price": "159,548,000원",
+                "grid_level": "6/11",
+                "quantity": "0.000220개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:47:24",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,479,600원",
+            "reason": "상승 추세 지속으로 그리드 7 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,433,000원",
+                "new_target": "159,479,600원",
+                "current_price": "159,548,000원",
+                "grid_level": "7/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:47:26",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 159,526,200원",
+            "reason": "상승 추세 지속으로 그리드 8 레벨 목표 상향",
+            "details": {
+                "previous_target": "159,479,600원",
+                "new_target": "159,526,200원",
+                "current_price": "159,548,000원",
+                "grid_level": "8/11"
+            }
+        },
+        {
+            "time": "2025-08-24 22:51:31",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 159,526,200원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 8/11 도달",
+            "details": "이전가격: 159,541,000원 → 현재가격: 159,507,000원 (그리드가격: 159,526,200원)"
+        },
+        {
+            "time": "2025-08-24 22:52:00",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,479,600원"
+        },
+        {
+            "time": "2025-08-24 22:54:02",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,433,000원"
+        },
+        {
+            "time": "2025-08-24 22:56:19",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,386,400원"
+        },
+        {
+            "time": "2025-08-24 23:02:34",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 159,526,200원 (0.000220개) 순수익: 23원",
+            "reason": "그리드 레벨 8 하락 확인",
+            "details": {
+                "buy_price": "159,339,800원",
+                "sell_price": "159,526,200원",
+                "grid_level": "8/11",
+                "confirmation_price": "159,366,674원",
+                "current_price": "159,358,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "23원",
+                "quantity": "0.000220개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:02:34",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 159,526,200원 (0.000220개) 순수익: 13원",
+            "reason": "그리드 레벨 8 하락 확인",
+            "details": {
+                "buy_price": "159,386,400원",
+                "sell_price": "159,526,200원",
+                "grid_level": "8/11",
+                "confirmation_price": "159,366,674원",
+                "current_price": "159,358,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "13원",
+                "quantity": "0.000220개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:02:38",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,339,800원"
+        },
+        {
+            "time": "2025-08-24 23:03:22",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,293,200원"
+        },
+        {
+            "time": "2025-08-24 23:04:35",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,246,600원"
+        },
+        {
+            "time": "2025-08-24 23:04:41",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 159,200,000원"
         }
     ],
     "KRW-XRP": [
@@ -1697,6 +1993,597 @@
             "price": "매수 그리드 4,190원 도달. 매수 보류 시작.",
             "reason": "그리드 레벨 5/21 도달",
             "details": "이전가격: 4,190원 → 현재가격: 4,189원 (그리드가격: 4,190원)"
+        },
+        {
+            "time": "2025-08-24 22:19:00",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,190원 (4.180543개)",
+            "reason": "그리드 레벨 5 반등 확인",
+            "details": {
+                "grid_price": "4,190원",
+                "confirmation_price": "4,194원",
+                "current_price": "4,194원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:22",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,195원",
+            "reason": "상승 추세 지속으로 그리드 6 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,190원",
+                "new_target": "4,195원",
+                "current_price": "4,197원",
+                "grid_level": "6/21"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:22",
+            "action": "데모 매도보류",
+            "price": "목표가 4,195원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,190원",
+                "target_price": "4,195원",
+                "current_price": "4,197원",
+                "grid_level": "6/21",
+                "quantity": "4.180543개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:49",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,200원",
+            "reason": "상승 추세 지속으로 그리드 7 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,195원",
+                "new_target": "4,200원",
+                "current_price": "4,201원",
+                "grid_level": "7/21"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:49",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,200원",
+            "reason": "상승 추세 지속으로 그리드 7 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,195원",
+                "new_target": "4,200원",
+                "current_price": "4,201원",
+                "grid_level": "7/21"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:53",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,200원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 7/21 도달",
+            "details": "이전가격: 4,201원 → 현재가격: 4,199원 (그리드가격: 4,200원)"
+        },
+        {
+            "time": "2025-08-24 22:22:19",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 4,200원 (4.185938개) 순수익: 59원",
+            "reason": "그리드 레벨 7 하락 확인",
+            "details": {
+                "buy_price": "4,184원",
+                "sell_price": "4,200원",
+                "grid_level": "7/21",
+                "confirmation_price": "4,196원",
+                "current_price": "4,196원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "59원",
+                "quantity": "4.185938개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:22:19",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 4,200원 (4.180543개) 순수익: 36원",
+            "reason": "그리드 레벨 7 하락 확인",
+            "details": {
+                "buy_price": "4,190원",
+                "sell_price": "4,200원",
+                "grid_level": "7/21",
+                "confirmation_price": "4,196원",
+                "current_price": "4,196원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "36원",
+                "quantity": "4.180543개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:22:23",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 4,195원"
+        },
+        {
+            "time": "2025-08-24 22:23:36",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,195원 (4.175161개)",
+            "reason": "그리드 레벨 6 반등 확인",
+            "details": {
+                "grid_price": "4,195원",
+                "confirmation_price": "4,199원",
+                "current_price": "4,200원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:27:39",
+            "action": "데모 매도보류",
+            "price": "목표가 4,200원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,195원",
+                "target_price": "4,200원",
+                "current_price": "4,201원",
+                "grid_level": "7/21",
+                "quantity": "4.175161개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:27:43",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,200원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 7/21 도달",
+            "details": "이전가격: 4,201원 → 현재가격: 4,200원 (그리드가격: 4,200원)"
+        },
+        {
+            "time": "2025-08-24 22:32:54",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 4,200원 (4.175161개) 순수익: 14원",
+            "reason": "그리드 레벨 7 하락 확인",
+            "details": {
+                "buy_price": "4,195원",
+                "sell_price": "4,200원",
+                "grid_level": "7/21",
+                "confirmation_price": "4,196원",
+                "current_price": "4,196원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "14원",
+                "quantity": "4.175161개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:03:14",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 4,195원"
+        },
+        {
+            "time": "2025-08-24 23:15:39",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,195원 (4.175161개)",
+            "reason": "그리드 레벨 6 반등 확인",
+            "details": {
+                "grid_price": "4,195원",
+                "confirmation_price": "4,199원",
+                "current_price": "4,200원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:15:41",
+            "action": "데모 매도보류",
+            "price": "목표가 4,200원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,195원",
+                "target_price": "4,200원",
+                "current_price": "4,202원",
+                "grid_level": "7/21",
+                "quantity": "4.175161개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:18:32",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,206원",
+            "reason": "상승 추세 지속으로 그리드 8 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,200원",
+                "new_target": "4,206원",
+                "current_price": "4,206원",
+                "grid_level": "8/21"
+            }
+        },
+        {
+            "time": "2025-08-24 23:18:55",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,206원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 8/21 도달",
+            "details": "이전가격: 4,206원 → 현재가격: 4,204원 (그리드가격: 4,206원)"
+        },
+        {
+            "time": "2025-08-24 23:19:07",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 4,200원"
+        },
+        {
+            "time": "2025-08-24 23:19:07",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 4,206원 (4.175161개) 순수익: 36원",
+            "reason": "그리드 레벨 8 하락 확인",
+            "details": {
+                "buy_price": "4,195원",
+                "sell_price": "4,206원",
+                "grid_level": "8/21",
+                "confirmation_price": "4,202원",
+                "current_price": "4,200원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "36원",
+                "quantity": "4.175161개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:19:20",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,200원 (4.169794개)",
+            "reason": "그리드 레벨 7 반등 확인",
+            "details": {
+                "grid_price": "4,200원",
+                "confirmation_price": "4,205원",
+                "current_price": "4,205원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:25:18",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,195원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 6/21 도달",
+            "details": "이전가격: 4,197원 → 현재가격: 4,195원 (그리드가격: 4,195원)"
+        },
+        {
+            "time": "2025-08-24 23:36:53",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 4,190원"
+        },
+        {
+            "time": "2025-08-24 23:38:06",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 4,184원"
+        },
+        {
+            "time": "2025-08-24 23:39:41",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,184원 (4.185938개)",
+            "reason": "그리드 레벨 4 반등 확인",
+            "details": {
+                "grid_price": "4,184원",
+                "confirmation_price": "4,188원",
+                "current_price": "4,189원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:40:08",
+            "action": "데모 매도보류",
+            "price": "목표가 4,190원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,184원",
+                "target_price": "4,190원",
+                "current_price": "4,190원",
+                "grid_level": "5/21",
+                "quantity": "4.185938개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:41:25",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,190원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 5/21 도달",
+            "details": "이전가격: 4,190원 → 현재가격: 4,189원 (그리드가격: 4,190원)"
+        },
+        {
+            "time": "2025-08-24 23:45:23",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 4,190원 (4.185938개) 순수익: 14원",
+            "reason": "그리드 레벨 5 하락 확인",
+            "details": {
+                "buy_price": "4,184원",
+                "sell_price": "4,190원",
+                "grid_level": "5/21",
+                "confirmation_price": "4,185원",
+                "current_price": "4,185원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "14원",
+                "quantity": "4.185938개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:51:03",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,190원 (4.180543개)",
+            "reason": "그리드 레벨 5 반등 확인",
+            "details": {
+                "grid_price": "4,190원",
+                "confirmation_price": "4,194원",
+                "current_price": "4,194원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:53:29",
+            "action": "데모 매도보류",
+            "price": "목표가 4,195원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,190원",
+                "target_price": "4,195원",
+                "current_price": "4,195원",
+                "grid_level": "6/21",
+                "quantity": "4.180543개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:55:25",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,200원",
+            "reason": "상승 추세 지속으로 그리드 7 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,195원",
+                "new_target": "4,200원",
+                "current_price": "4,203원",
+                "grid_level": "7/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:00:38",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 4,200원 (4.180543개) 순수익: 36원",
+            "reason": "그리드 레벨 7 하락 확인",
+            "details": {
+                "buy_price": "4,190원",
+                "sell_price": "4,200원",
+                "grid_level": "7/21",
+                "confirmation_price": "4,196원",
+                "current_price": "4,196원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "36원",
+                "quantity": "4.180543개"
+            }
+        },
+        {
+            "time": "2025-08-25 00:00:59",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,195원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 6/21 도달",
+            "details": "이전가격: 4,196원 → 현재가격: 4,195원 (그리드가격: 4,195원)"
+        },
+        {
+            "time": "2025-08-25 00:02:31",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,195원 (4.175161개)",
+            "reason": "그리드 레벨 6 반등 확인",
+            "details": {
+                "grid_price": "4,195원",
+                "confirmation_price": "4,199원",
+                "current_price": "4,200원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-25 00:03:13",
+            "action": "데모 매도보류",
+            "price": "목표가 4,200원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,195원",
+                "target_price": "4,200원",
+                "current_price": "4,201원",
+                "grid_level": "7/21",
+                "quantity": "4.175161개"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:21",
+            "action": "데모 매도보류",
+            "price": "목표가 4,206원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,200원",
+                "target_price": "4,206원",
+                "current_price": "4,206원",
+                "grid_level": "8/21",
+                "quantity": "4.169794개"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:21",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,206원",
+            "reason": "상승 추세 지속으로 그리드 8 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,200원",
+                "new_target": "4,206원",
+                "current_price": "4,206원",
+                "grid_level": "8/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:25",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,206원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 8/21 도달",
+            "details": "이전가격: 4,207원 → 현재가격: 4,205원 (그리드가격: 4,206원)"
+        },
+        {
+            "time": "2025-08-25 00:05:57",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,206원 (4.164440개)",
+            "reason": "그리드 레벨 8 반등 확인",
+            "details": {
+                "grid_price": "4,206원",
+                "confirmation_price": "4,210원",
+                "current_price": "4,212원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:57",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,211원",
+            "reason": "상승 추세 지속으로 그리드 9 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,206원",
+                "new_target": "4,211원",
+                "current_price": "4,212원",
+                "grid_level": "9/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:57",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,211원",
+            "reason": "상승 추세 지속으로 그리드 9 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,206원",
+                "new_target": "4,211원",
+                "current_price": "4,212원",
+                "grid_level": "9/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:57",
+            "action": "데모 매도보류",
+            "price": "목표가 4,211원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,206원",
+                "target_price": "4,211원",
+                "current_price": "4,212원",
+                "grid_level": "9/21",
+                "quantity": "4.164440개"
+            }
+        },
+        {
+            "time": "2025-08-25 00:05:59",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 4,211원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 9/21 도달",
+            "details": "이전가격: 4,212원 → 현재가격: 4,209원 (그리드가격: 4,211원)"
+        },
+        {
+            "time": "2025-08-25 00:06:20",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 4,211원 (4.159100개)",
+            "reason": "그리드 레벨 9 반등 확인",
+            "details": {
+                "grid_price": "4,211원",
+                "confirmation_price": "4,215원",
+                "current_price": "4,216원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "17,524원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-25 00:06:30",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,217원",
+            "reason": "상승 추세 지속으로 그리드 10 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,211원",
+                "new_target": "4,217원",
+                "current_price": "4,218원",
+                "grid_level": "10/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:06:30",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,217원",
+            "reason": "상승 추세 지속으로 그리드 10 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,211원",
+                "new_target": "4,217원",
+                "current_price": "4,218원",
+                "grid_level": "10/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:06:30",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 4,217원",
+            "reason": "상승 추세 지속으로 그리드 10 레벨 목표 상향",
+            "details": {
+                "previous_target": "4,211원",
+                "new_target": "4,217원",
+                "current_price": "4,218원",
+                "grid_level": "10/21"
+            }
+        },
+        {
+            "time": "2025-08-25 00:06:30",
+            "action": "데모 매도보류",
+            "price": "목표가 4,217원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "4,211원",
+                "target_price": "4,217원",
+                "current_price": "4,218원",
+                "grid_level": "10/21",
+                "quantity": "4.159100개"
+            }
         }
     ],
     "KRW-ETH": [
@@ -4384,6 +5271,802 @@
                 "grid_level": "17/19",
                 "quantity": "0.002938개"
             }
+        },
+        {
+            "time": "2025-08-24 22:18:06",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,628,222원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 17/19 도달",
+            "details": "이전가격: 6,629,000원 → 현재가격: 6,628,000원 (그리드가격: 6,628,222원)"
+        },
+        {
+            "time": "2025-08-24 22:20:36",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,633,111원",
+            "reason": "상승 추세 지속으로 그리드 18 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,628,222원",
+                "new_target": "6,633,111원",
+                "current_price": "6,634,000원",
+                "grid_level": "18/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:36",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,633,111원",
+            "reason": "상승 추세 지속으로 그리드 18 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,628,222원",
+                "new_target": "6,633,111원",
+                "current_price": "6,634,000원",
+                "grid_level": "18/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:38",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,628,222원 (0.002936개)",
+            "reason": "그리드 레벨 17 반등 확인",
+            "details": {
+                "grid_price": "6,628,222원",
+                "confirmation_price": "6,634,850원",
+                "current_price": "6,635,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:38",
+            "action": "데모 매도보류",
+            "price": "목표가 6,633,111원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,628,222원",
+                "target_price": "6,633,111원",
+                "current_price": "6,635,000원",
+                "grid_level": "18/19",
+                "quantity": "0.002936개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:21:32",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,638,000원",
+            "reason": "상승 추세 지속으로 그리드 19 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,633,111원",
+                "new_target": "6,638,000원",
+                "current_price": "6,638,000원",
+                "grid_level": "19/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:21:32",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,638,000원",
+            "reason": "상승 추세 지속으로 그리드 19 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,633,111원",
+                "new_target": "6,638,000원",
+                "current_price": "6,638,000원",
+                "grid_level": "19/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:21:32",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,638,000원",
+            "reason": "상승 추세 지속으로 그리드 19 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,633,111원",
+                "new_target": "6,638,000원",
+                "current_price": "6,638,000원",
+                "grid_level": "19/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:24:13",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,633,111원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 18/19 도달",
+            "details": "이전가격: 6,635,000원 → 현재가격: 6,633,000원 (그리드가격: 6,633,111원)"
+        },
+        {
+            "time": "2025-08-24 22:24:45",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,638,000원 (0.002940개) 순수익: 48원",
+            "reason": "그리드 레벨 19 하락 확인",
+            "details": {
+                "buy_price": "6,618,444원",
+                "sell_price": "6,638,000원",
+                "grid_level": "19/19",
+                "confirmation_price": "6,631,362원",
+                "current_price": "6,629,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "48원",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:24:45",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,638,000원 (0.002938개) 순수익: 33원",
+            "reason": "그리드 레벨 19 하락 확인",
+            "details": {
+                "buy_price": "6,623,333원",
+                "sell_price": "6,638,000원",
+                "grid_level": "19/19",
+                "confirmation_price": "6,631,362원",
+                "current_price": "6,629,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "33원",
+                "quantity": "0.002938개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:24:45",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,638,000원 (0.002936개) 순수익: 19원",
+            "reason": "그리드 레벨 19 하락 확인",
+            "details": {
+                "buy_price": "6,628,222원",
+                "sell_price": "6,638,000원",
+                "grid_level": "19/19",
+                "confirmation_price": "6,631,362원",
+                "current_price": "6,629,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "19원",
+                "quantity": "0.002936개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:24:53",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,628,222원"
+        },
+        {
+            "time": "2025-08-24 22:31:35",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,623,333원"
+        },
+        {
+            "time": "2025-08-24 22:35:25",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,623,333원 (0.002938개)",
+            "reason": "그리드 레벨 16 반등 확인",
+            "details": {
+                "grid_price": "6,623,333원",
+                "confirmation_price": "6,629,957원",
+                "current_price": "6,630,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:35:25",
+            "action": "데모 매도보류",
+            "price": "목표가 6,628,222원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,623,333원",
+                "target_price": "6,628,222원",
+                "current_price": "6,630,000원",
+                "grid_level": "17/19",
+                "quantity": "0.002938개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:37:00",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,633,111원",
+            "reason": "상승 추세 지속으로 그리드 18 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,628,222원",
+                "new_target": "6,633,111원",
+                "current_price": "6,634,000원",
+                "grid_level": "18/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:37:29",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,638,000원",
+            "reason": "상승 추세 지속으로 그리드 19 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,633,111원",
+                "new_target": "6,638,000원",
+                "current_price": "6,638,000원",
+                "grid_level": "19/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:38:12",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,633,111원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 18/19 도달",
+            "details": "이전가격: 6,635,000원 → 현재가격: 6,630,000원 (그리드가격: 6,633,111원)"
+        },
+        {
+            "time": "2025-08-24 22:38:12",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,638,000원 (0.002938개) 순수익: 33원",
+            "reason": "그리드 레벨 19 하락 확인",
+            "details": {
+                "buy_price": "6,623,333원",
+                "sell_price": "6,638,000원",
+                "grid_level": "19/19",
+                "confirmation_price": "6,631,362원",
+                "current_price": "6,630,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "33원",
+                "quantity": "0.002938개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:39:59",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,628,222원"
+        },
+        {
+            "time": "2025-08-24 22:41:14",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,623,333원"
+        },
+        {
+            "time": "2025-08-24 22:41:48",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,618,444원"
+        },
+        {
+            "time": "2025-08-24 22:43:37",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,618,444원 (0.002940개)",
+            "reason": "그리드 레벨 15 반등 확인",
+            "details": {
+                "grid_price": "6,618,444원",
+                "confirmation_price": "6,625,063원",
+                "current_price": "6,626,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:43:37",
+            "action": "데모 매도보류",
+            "price": "목표가 6,623,333원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,618,444원",
+                "target_price": "6,623,333원",
+                "current_price": "6,626,000원",
+                "grid_level": "16/19",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:43:54",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,628,222원",
+            "reason": "상승 추세 지속으로 그리드 17 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,623,333원",
+                "new_target": "6,628,222원",
+                "current_price": "6,630,000원",
+                "grid_level": "17/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:44:22",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,628,222원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 17/19 도달",
+            "details": "이전가격: 6,630,000원 → 현재가격: 6,626,000원 (그리드가격: 6,628,222원)"
+        },
+        {
+            "time": "2025-08-24 22:44:49",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,623,333원"
+        },
+        {
+            "time": "2025-08-24 22:44:55",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,628,222원 (0.002940개) 순수익: 19원",
+            "reason": "그리드 레벨 17 하락 확인",
+            "details": {
+                "buy_price": "6,618,444원",
+                "sell_price": "6,628,222원",
+                "grid_level": "17/19",
+                "confirmation_price": "6,621,594원",
+                "current_price": "6,621,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "19원",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:45:08",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,618,444원"
+        },
+        {
+            "time": "2025-08-24 22:48:22",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,618,444원 (0.002940개)",
+            "reason": "그리드 레벨 15 반등 확인",
+            "details": {
+                "grid_price": "6,618,444원",
+                "confirmation_price": "6,625,063원",
+                "current_price": "6,629,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:48:22",
+            "action": "데모 매도보류",
+            "price": "목표가 6,623,333원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,618,444원",
+                "target_price": "6,623,333원",
+                "current_price": "6,629,000원",
+                "grid_level": "16/19",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:48:24",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,628,222원",
+            "reason": "상승 추세 지속으로 그리드 17 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,623,333원",
+                "new_target": "6,628,222원",
+                "current_price": "6,629,000원",
+                "grid_level": "17/19"
+            }
+        },
+        {
+            "time": "2025-08-24 22:48:31",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,623,333원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 16/19 도달",
+            "details": "이전가격: 6,630,000원 → 현재가격: 6,623,000원 (그리드가격: 6,623,333원)"
+        },
+        {
+            "time": "2025-08-24 22:48:38",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,628,222원 (0.002940개) 순수익: 19원",
+            "reason": "그리드 레벨 17 하락 확인",
+            "details": {
+                "buy_price": "6,618,444원",
+                "sell_price": "6,628,222원",
+                "grid_level": "17/19",
+                "confirmation_price": "6,621,594원",
+                "current_price": "6,619,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "19원",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:50:35",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,623,333원 (0.002938개)",
+            "reason": "그리드 레벨 16 반등 확인",
+            "details": {
+                "grid_price": "6,623,333원",
+                "confirmation_price": "6,629,957원",
+                "current_price": "6,630,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 22:50:35",
+            "action": "데모 매도보류",
+            "price": "목표가 6,628,222원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,623,333원",
+                "target_price": "6,628,222원",
+                "current_price": "6,630,000원",
+                "grid_level": "17/19",
+                "quantity": "0.002938개"
+            }
+        },
+        {
+            "time": "2025-08-24 22:51:54",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,628,222원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 17/19 도달",
+            "details": "이전가격: 6,629,000원 → 현재가격: 6,626,000원 (그리드가격: 6,628,222원)"
+        },
+        {
+            "time": "2025-08-24 22:54:06",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,623,333원"
+        },
+        {
+            "time": "2025-08-24 22:56:52",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,628,222원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 17/19 도달",
+            "details": "이전가격: 6,630,000원 → 현재가격: 6,627,000원 (그리드가격: 6,628,222원)"
+        },
+        {
+            "time": "2025-08-24 23:02:49",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,623,333원"
+        },
+        {
+            "time": "2025-08-24 23:02:58",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,628,222원 (0.002938개) 순수익: 5원",
+            "reason": "그리드 레벨 17 하락 확인",
+            "details": {
+                "buy_price": "6,623,333원",
+                "sell_price": "6,628,222원",
+                "grid_level": "17/19",
+                "confirmation_price": "6,621,594원",
+                "current_price": "6,621,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "5원",
+                "quantity": "0.002938개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:03:21",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,618,444원"
+        },
+        {
+            "time": "2025-08-24 23:04:24",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,613,556원"
+        },
+        {
+            "time": "2025-08-24 23:05:37",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,613,556원 (0.002943개)",
+            "reason": "그리드 레벨 14 반등 확인",
+            "details": {
+                "grid_price": "6,613,556원",
+                "confirmation_price": "6,620,169원",
+                "current_price": "6,621,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:05:37",
+            "action": "데모 매도보류",
+            "price": "목표가 6,618,444원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,613,556원",
+                "target_price": "6,618,444원",
+                "current_price": "6,621,000원",
+                "grid_level": "15/19",
+                "quantity": "0.002943개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:05:54",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,618,444원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 15/19 도달",
+            "details": "이전가격: 6,621,000원 → 현재가격: 6,618,000원 (그리드가격: 6,618,444원)"
+        },
+        {
+            "time": "2025-08-24 23:10:04",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,618,444원 (0.002940개)",
+            "reason": "그리드 레벨 15 반등 확인",
+            "details": {
+                "grid_price": "6,618,444원",
+                "confirmation_price": "6,625,063원",
+                "current_price": "6,626,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:10:04",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,623,333원",
+            "reason": "상승 추세 지속으로 그리드 16 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,618,444원",
+                "new_target": "6,623,333원",
+                "current_price": "6,626,000원",
+                "grid_level": "16/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:10:04",
+            "action": "데모 매도보류",
+            "price": "목표가 6,623,333원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,618,444원",
+                "target_price": "6,623,333원",
+                "current_price": "6,626,000원",
+                "grid_level": "16/19",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:10:14",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,628,222원",
+            "reason": "상승 추세 지속으로 그리드 17 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,623,333원",
+                "new_target": "6,628,222원",
+                "current_price": "6,629,000원",
+                "grid_level": "17/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:10:14",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,628,222원",
+            "reason": "상승 추세 지속으로 그리드 17 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,623,333원",
+                "new_target": "6,628,222원",
+                "current_price": "6,629,000원",
+                "grid_level": "17/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:13:06",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,628,222원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 17/19 도달",
+            "details": "이전가격: 6,630,000원 → 현재가격: 6,624,000원 (그리드가격: 6,628,222원)"
+        },
+        {
+            "time": "2025-08-24 23:13:09",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,623,333원"
+        },
+        {
+            "time": "2025-08-24 23:13:21",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,628,222원 (0.002943개) 순수익: 33원",
+            "reason": "그리드 레벨 17 하락 확인",
+            "details": {
+                "buy_price": "6,613,556원",
+                "sell_price": "6,628,222원",
+                "grid_level": "17/19",
+                "confirmation_price": "6,621,594원",
+                "current_price": "6,621,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "33원",
+                "quantity": "0.002943개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:13:21",
+            "action": "데모 매도",
+            "price": "상승추세 종료 매도: 6,628,222원 (0.002940개) 순수익: 19원",
+            "reason": "그리드 레벨 17 하락 확인",
+            "details": {
+                "buy_price": "6,618,444원",
+                "sell_price": "6,628,222원",
+                "grid_level": "17/19",
+                "confirmation_price": "6,621,594원",
+                "current_price": "6,621,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "net_profit": "19원",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:13:28",
+            "action": "데모 매수보류",
+            "price": "매수 보류 및 목표 하향: 6,618,444원"
+        },
+        {
+            "time": "2025-08-24 23:14:11",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,618,444원 (0.002940개)",
+            "reason": "그리드 레벨 15 반등 확인",
+            "details": {
+                "grid_price": "6,618,444원",
+                "confirmation_price": "6,625,063원",
+                "current_price": "6,626,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:14:11",
+            "action": "데모 매도보류",
+            "price": "목표가 6,623,333원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,618,444원",
+                "target_price": "6,623,333원",
+                "current_price": "6,626,000원",
+                "grid_level": "16/19",
+                "quantity": "0.002940개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:14:15",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,628,222원",
+            "reason": "상승 추세 지속으로 그리드 17 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,623,333원",
+                "new_target": "6,628,222원",
+                "current_price": "6,629,000원",
+                "grid_level": "17/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:14:17",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,628,222원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 17/19 도달",
+            "details": "이전가격: 6,629,000원 → 현재가격: 6,628,000원 (그리드가격: 6,628,222원)"
+        },
+        {
+            "time": "2025-08-24 23:16:06",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,628,222원 (0.002936개)",
+            "reason": "그리드 레벨 17 반등 확인",
+            "details": {
+                "grid_price": "6,628,222원",
+                "confirmation_price": "6,634,850원",
+                "current_price": "6,635,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:16:06",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,633,111원",
+            "reason": "상승 추세 지속으로 그리드 18 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,628,222원",
+                "new_target": "6,633,111원",
+                "current_price": "6,635,000원",
+                "grid_level": "18/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:16:06",
+            "action": "데모 매도보류",
+            "price": "목표가 6,633,111원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,628,222원",
+                "target_price": "6,633,111원",
+                "current_price": "6,635,000원",
+                "grid_level": "18/19",
+                "quantity": "0.002936개"
+            }
+        },
+        {
+            "time": "2025-08-24 23:16:12",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,638,000원",
+            "reason": "상승 추세 지속으로 그리드 19 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,633,111원",
+                "new_target": "6,638,000원",
+                "current_price": "6,638,000원",
+                "grid_level": "19/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:16:12",
+            "action": "데모 매도보류",
+            "price": "매도 보류 및 목표 상향: 6,638,000원",
+            "reason": "상승 추세 지속으로 그리드 19 레벨 목표 상향",
+            "details": {
+                "previous_target": "6,633,111원",
+                "new_target": "6,638,000원",
+                "current_price": "6,638,000원",
+                "grid_level": "19/19"
+            }
+        },
+        {
+            "time": "2025-08-24 23:38:02",
+            "action": "데모 매수보류",
+            "price": "매수 그리드 6,633,111원 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 18/19 도달",
+            "details": "이전가격: 6,634,000원 → 현재가격: 6,633,000원 (그리드가격: 6,633,111원)"
+        },
+        {
+            "time": "2025-08-24 23:39:51",
+            "action": "데모 매수",
+            "price": "하락추세 반전 매수: 6,633,111원 (0.002934개)",
+            "reason": "그리드 레벨 18 반등 확인",
+            "details": {
+                "grid_price": "6,633,111원",
+                "confirmation_price": "6,639,744원",
+                "current_price": "6,641,000원",
+                "technical_signal": "hold",
+                "confidence": "0.0%",
+                "override_status": "미적용",
+                "position_size": "19,471원",
+                "market_sentiment": "sideways",
+                "panic_mode": "비활성"
+            }
+        },
+        {
+            "time": "2025-08-24 23:39:51",
+            "action": "데모 매도보류",
+            "price": "목표가 6,638,000원 도달. 매도 보류 시작.",
+            "reason": "목표 그리드 가격 도달로 매도 보류 시작",
+            "details": {
+                "buy_price": "6,633,111원",
+                "target_price": "6,638,000원",
+                "current_price": "6,641,000원",
+                "grid_level": "19/19",
+                "quantity": "0.002934개"
+            }
         }
     ],
     "SYSTEM": [
@@ -4439,6 +6122,34 @@
                 "realized_profit": "1,023원",
                 "updated_investment": "1,002,369원",
                 "growth_rate": "+0.10%",
+                "force_update": "자동",
+                "trigger": "수익 복리 투자"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:11",
+            "action": "투자금 업데이트",
+            "price": "기존: 1,003,390원 + 수익: 1,349원 = 신규: 1,004,739원",
+            "reason": "실현 수익 1,349원 투자금 재투자",
+            "details": {
+                "original_investment": "1,003,390원",
+                "realized_profit": "1,349원",
+                "updated_investment": "1,004,739원",
+                "growth_rate": "+0.13%",
+                "force_update": "자동",
+                "trigger": "수익 복리 투자"
+            }
+        },
+        {
+            "time": "2025-08-24 23:20:14",
+            "action": "투자금 업데이트",
+            "price": "기존: 1,006,086원 + 수익: 1,814원 = 신규: 1,007,900원",
+            "reason": "실현 수익 1,814원 투자금 재투자",
+            "details": {
+                "original_investment": "1,006,086원",
+                "realized_profit": "1,814원",
+                "updated_investment": "1,007,900원",
+                "growth_rate": "+0.18%",
                 "force_update": "자동",
                 "trigger": "수익 복리 투자"
             }
@@ -4514,6 +6225,54 @@
                 "previous_investment": "1,002,368원",
                 "profit": "1,023원",
                 "new_investment": "1,003,391원",
+                "trigger": "시스템 오류 시 안전 조치"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:11",
+            "action": "비상수익재투자",
+            "price": "수익: +1,349원",
+            "reason": "오류 발생 시 비상 수익 재투자",
+            "details": {
+                "previous_investment": "1,003,390원",
+                "profit": "1,349원",
+                "new_investment": "1,004,739원",
+                "trigger": "시스템 오류 시 안전 조치"
+            }
+        },
+        {
+            "time": "2025-08-24 22:20:22",
+            "action": "비상수익재투자",
+            "price": "수익: +1,349원",
+            "reason": "오류 발생 시 비상 수익 재투자",
+            "details": {
+                "previous_investment": "1,004,738원",
+                "profit": "1,349원",
+                "new_investment": "1,006,087원",
+                "trigger": "시스템 오류 시 안전 조치"
+            }
+        },
+        {
+            "time": "2025-08-24 23:20:14",
+            "action": "비상수익재투자",
+            "price": "수익: +1,814원",
+            "reason": "오류 발생 시 비상 수익 재투자",
+            "details": {
+                "previous_investment": "1,006,086원",
+                "profit": "1,814원",
+                "new_investment": "1,007,900원",
+                "trigger": "시스템 오류 시 안전 조치"
+            }
+        },
+        {
+            "time": "2025-08-24 23:20:25",
+            "action": "비상수익재투자",
+            "price": "수익: +1,814원",
+            "reason": "오류 발생 시 비상 수익 재투자",
+            "details": {
+                "previous_investment": "1,007,899원",
+                "profit": "1,814원",
+                "new_investment": "1,009,713원",
                 "trigger": "시스템 오류 시 안전 조치"
             }
         }
