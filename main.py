@@ -329,92 +329,366 @@ class CoinSpecificGridManager:
         manual_period = coin_config.get('price_range_hours', 4)  # 기본 4시간
         print(f"📊 {coin_name} 수동 기간: {manual_period}시간")
         return manual_period
+
+# 완전 자동 거래 시스템
+class AutoTradingSystem:
+    def __init__(self):
+        self.risk_profiles = {
+            "보수적": {
+                "max_grid_count": 15,
+                "max_investment_ratio": 0.3,  # 총 자산의 30%만 투자
+                "panic_threshold": -3.0,  # 3% 하락시 급락 감지
+                "stop_loss_threshold": -5.0,  # 5% 손절
+                "trailing_stop_percent": 2.0,  # 2% 트레일링 스탑
+                "grid_confirmation_buffer": 0.2,  # 확인 버퍼 크게
+                "rebalance_threshold": 0.05  # 5% 변동시 리밸런싱
+            },
+            "안정적": {
+                "max_grid_count": 20,
+                "max_investment_ratio": 0.5,
+                "panic_threshold": -5.0,
+                "stop_loss_threshold": -8.0,
+                "trailing_stop_percent": 3.0,
+                "grid_confirmation_buffer": 0.15,
+                "rebalance_threshold": 0.08
+            },
+            "공격적": {
+                "max_grid_count": 30,
+                "max_investment_ratio": 0.7,
+                "panic_threshold": -7.0,
+                "stop_loss_threshold": -12.0,
+                "trailing_stop_percent": 4.0,
+                "grid_confirmation_buffer": 0.1,
+                "rebalance_threshold": 0.12
+            },
+            "극공격적": {
+                "max_grid_count": 50,
+                "max_investment_ratio": 0.9,
+                "panic_threshold": -10.0,
+                "stop_loss_threshold": -15.0,
+                "trailing_stop_percent": 5.0,
+                "grid_confirmation_buffer": 0.05,
+                "rebalance_threshold": 0.15
+            }
+        }
+        
+        self.performance_data = {
+            "total_trades": 0,
+            "winning_trades": 0,
+            "losing_trades": 0,
+            "total_profit": 0.0,
+            "max_drawdown": 0.0,
+            "last_optimization": None,
+            "hourly_performance": [],
+            "volatility_score": 0.0,
+            "trend_strength": 0.0,
+            "portfolio_risk": 0.0
+        }
     
+    def _analyze_market_volatility(self, ticker):
+        """시장 변동성 실시간 분석"""
+        try:
+            # 다양한 시간대 데이터 수집
+            df_1h = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)  # 24시간
+            df_15m = pyupbit.get_ohlcv(ticker, interval='minute15', count=96)  # 24시간
+            df_5m = pyupbit.get_ohlcv(ticker, interval='minute5', count=288)   # 24시간
+            
+            if df_1h is None or df_15m is None or df_5m is None:
+                return {'volatility_level': '보통', 'trend_strength': 0, 'volume_ratio': 1.0}
+            
+            # 1. 가격 변동성 계산 (표준편차 기반)
+            price_changes_1h = df_1h['close'].pct_change().dropna()
+            price_changes_15m = df_15m['close'].pct_change().dropna()
+            price_changes_5m = df_5m['close'].pct_change().dropna()
+            
+            volatility_1h = price_changes_1h.std() * 100
+            volatility_15m = price_changes_15m.std() * 100
+            volatility_5m = price_changes_5m.std() * 100
+            
+            # 가중 평균 변동성
+            avg_volatility = (volatility_1h * 0.5 + volatility_15m * 0.3 + volatility_5m * 0.2)
+            
+            # 2. 변동성 레벨 분류
+            if avg_volatility < 0.5:
+                volatility_level = "매우낮음"
+            elif avg_volatility < 1.0:
+                volatility_level = "낮음"
+            elif avg_volatility < 2.0:
+                volatility_level = "보통"
+            elif avg_volatility < 4.0:
+                volatility_level = "높음"
+            else:
+                volatility_level = "매우높음"
+            
+            # 3. 트렌드 강도 계산
+            recent_prices = df_1h['close'].tail(12)  # 최근 12시간
+            if len(recent_prices) >= 2:
+                trend_strength = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+            else:
+                trend_strength = 0
+            
+            # 4. 거래량 비율 계산
+            recent_volume = df_1h['volume'].tail(6).mean()  # 최근 6시간 평균
+            past_volume = df_1h['volume'].head(18).mean()   # 과거 18시간 평균
+            volume_ratio = recent_volume / past_volume if past_volume > 0 else 1.0
+            
+            return {
+                'volatility_level': volatility_level,
+                'volatility_value': avg_volatility,
+                'trend_strength': trend_strength,
+                'volume_ratio': volume_ratio
+            }
+            
+        except Exception as e:
+            print(f"시장 분석 오류: {e}")
+            return {'volatility_level': '보통', 'trend_strength': 0, 'volume_ratio': 1.0}
+    
+    def _get_cached_price_range(self, ticker, hours):
+        """캐시된 가격 범위 데이터 조회"""
+        try:
+            cache_duration_minutes = 5 if hours <= 1 else (10 if hours <= 4 else 15)
+            cache_key = f"{ticker}_{hours}h"
+            cache_file = os.path.join("data", "price_range_cache.json")
+            
+            # 캐시 확인
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        cache = json.load(f)
+                        if cache_key in cache:
+                            cached_entry = cache[cache_key]
+                            cache_time = datetime.fromisoformat(cached_entry['timestamp'])
+                            if datetime.now() - cache_time < timedelta(minutes=cache_duration_minutes):
+                                return cached_entry['high'], cached_entry['low']
+                except:
+                    pass
+            
+            # 새로 계산
+            high_price, low_price = calculate_price_range_hours(ticker, hours)
+            if high_price and low_price:
+                # 캐시 저장
+                if not os.path.exists("data"):
+                    os.makedirs("data")
+                
+                try:
+                    cache = {}
+                    if os.path.exists(cache_file):
+                        with open(cache_file, 'r', encoding='utf-8') as f:
+                            cache = json.load(f)
+                    
+                    cache[cache_key] = {
+                        'high': high_price,
+                        'low': low_price,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(cache, f, ensure_ascii=False, indent=2)
+                        
+                except Exception as e:
+                    print(f"캐시 저장 실패: {e}")
+            
+            return high_price, low_price
+            
+        except Exception as e:
+            print(f"가격 범위 조회 오류: {e}")
+            return None, None
+    
+    def _calculate_dynamic_grid_count(self, ticker, high_price, low_price, base_grid, volatility_level, trend_strength, volume_ratio):
+        """동적 그리드 수 계산"""
+        try:
+            # 기본 가격 변동폭 계산
+            price_range = high_price - low_price
+            price_volatility = price_range / low_price
+            
+            # 1. 변동성 기반 조정
+            volatility_multiplier = {
+                "매우낮음": 0.7,  # 변동성 낮으면 그리드 줄임
+                "낮음": 0.85,
+                "보통": 1.0,
+                "높음": 1.3,      # 변동성 높으면 그리드 늘림
+                "매우높음": 1.6
+            }.get(volatility_level, 1.0)
+            
+            # 2. 트렌드 강도 기반 조정
+            trend_multiplier = 1.0
+            if abs(trend_strength) > 0.1:  # 강한 트렌드
+                trend_multiplier = 1.2  # 트렌드가 강하면 그리드 늘림
+            elif abs(trend_strength) < 0.03:  # 횡보
+                trend_multiplier = 0.9  # 횡보시 그리드 줄임
+            
+            # 3. 거래량 기반 조정
+            volume_multiplier = 1.0
+            if volume_ratio > 2.0:  # 거래량 급증
+                volume_multiplier = 1.25
+            elif volume_ratio < 0.5:  # 거래량 급감
+                volume_multiplier = 0.8
+            
+            # 4. 가격대별 조정 (비트코인, 이더리움, 리플 특성 반영)
+            coin_multiplier = {
+                'KRW-BTC': 1.0,   # 비트코인은 기본
+                'KRW-ETH': 1.1,   # 이더리움은 약간 많이
+                'KRW-XRP': 1.3    # 리플은 변동성이 크므로 더 많이
+            }.get(ticker, 1.0)
+            
+            # 최종 그리드 수 계산
+            dynamic_grid = int(base_grid * volatility_multiplier * trend_multiplier * volume_multiplier * coin_multiplier)
+            
+            # 최솟값과 최댓값 제한
+            min_grid = 10
+            max_grid = 60
+            
+            return max(min_grid, min(max_grid, dynamic_grid))
+            
+        except Exception as e:
+            print(f"동적 그리드 계산 오류: {e}")
+            return base_grid
+    
+    def _advanced_profit_simulation(self, ticker, hours, grid_count, high_price, low_price, volatility_level, trend_strength, volume_ratio):
+        """고급 수익성 시뮬레이션"""
+        try:
+            price_range = high_price - low_price
+            price_volatility = price_range / low_price
+            
+            # 1. 변동성 점수 (적절한 변동성 > 너무 높거나 낮은 변동성)
+            optimal_volatility = 0.08  # 8%가 이상적
+            volatility_score = 1 - min(abs(price_volatility - optimal_volatility) / optimal_volatility, 1)
+            
+            # 2. 그리드 밀도 점수 (가격 범위 대비 그리드 수의 적절성)
+            grid_density = grid_count / (price_volatility * 100)
+            optimal_density = 3.0  # 변동성 1%당 3개 그리드가 이상적
+            density_score = 1 - min(abs(grid_density - optimal_density) / optimal_density, 1)
+            
+            # 3. 시장 상황 점수
+            market_score = 1.0
+            if volatility_level in ["높음", "매우높음"]:
+                market_score = 1.2  # 높은 변동성은 그리드 거래에 유리
+            elif volatility_level in ["매우낮음"]:
+                market_score = 0.7  # 너무 낮은 변동성은 불리
+            
+            # 4. 트렌드 적응 점수
+            trend_score = 1.0
+            if abs(trend_strength) < 0.05:  # 횡보장 - 그리드 거래에 최적
+                trend_score = 1.3
+            elif abs(trend_strength) > 0.2:  # 강한 트렌드 - 그리드 거래에 불리
+                trend_score = 0.8
+            
+            # 5. 거래량 점수
+            volume_score = min(volume_ratio, 2.0) / 2.0  # 거래량이 많을수록 유리 (최대 2배까지)
+            
+            # 6. 기간 점수 (변동성에 맞는 기간인지)
+            period_score = 1.0
+            if volatility_level == "매우높음" and hours > 2:
+                period_score = 0.8  # 고변동성시 긴 기간은 불리
+            elif volatility_level == "매우낮음" and hours < 6:
+                period_score = 0.8  # 저변동성시 짧은 기간은 불리
+            
+            # 종합 점수 계산 (가중평균)
+            final_score = (
+                volatility_score * 0.25 +    # 변동성 적절성 25%
+                density_score * 0.25 +       # 그리드 밀도 25%
+                market_score * 0.20 +        # 시장 상황 20%
+                trend_score * 0.15 +         # 트렌드 적응성 15%
+                volume_score * 0.10 +        # 거래량 10%
+                period_score * 0.05          # 기간 적절성 5%
+            )
+            
+            return final_score
+            
+        except Exception as e:
+            print(f"수익성 시뮬레이션 오류: {e}")
+            return 0.5
+    
+    def _apply_trend_adjustment(self, grid_count, trend_strength, volume_ratio):
+        """트렌드에 따른 최종 그리드 조정"""
+        try:
+            # 강한 상승/하락 트렌드시 그리드 조정
+            if abs(trend_strength) > 0.15:
+                if trend_strength > 0:  # 상승 트렌드
+                    # 상승 구간에서 더 많은 매도 기회를 위해 그리드 증가
+                    grid_count = int(grid_count * 1.1)
+                else:  # 하락 트렌드
+                    # 하락 구간에서 더 많은 매수 기회를 위해 그리드 증가
+                    grid_count = int(grid_count * 1.15)
+            
+            # 거래량 급증시 그리드 조정
+            if volume_ratio > 3.0:  # 거래량 3배 이상 증가
+                grid_count = int(grid_count * 1.2)  # 20% 증가
+            
+            return max(10, min(60, grid_count))  # 최종 범위 제한
+            
+        except Exception as e:
+            print(f"트렌드 조정 오류: {e}")
+            return grid_count
+
     def find_optimal_period_and_grid(self, ticker):
-        """최적의 기간과 그리드 개수를 찾는 고급 알고리즘 (백테스팅 포함)"""
+        """동적 가격변화 폭 기반 최적화 알고리즘 (15분 주기)"""
         try:
             coin_name = get_korean_coin_name(ticker)
-            print(f"🔍 {coin_name} 자동 최적화 시작...")
+            print(f"🔍 {coin_name} 동적 최적화 시작...")
             
-            # 단타를 위한 짧은 기간 테스트 (시간 단위)
-            test_periods = [0.5, 1, 2, 4, 6, 12]  # 30분~12시간
+            # 1단계: 시장 변동성 실시간 분석
+            market_analysis = self._analyze_market_volatility(ticker)
+            volatility_level = market_analysis['volatility_level']
+            trend_strength = market_analysis['trend_strength']
+            volume_ratio = market_analysis['volume_ratio']
+            
+            print(f"📊 {coin_name} 시장 분석: 변동성({volatility_level}), 트렌드({trend_strength:.2f}), 거래량({volume_ratio:.2f})")
+            
+            # 2단계: 변동성에 따른 동적 기간 선택
+            if volatility_level == "매우낮음":
+                test_periods = [6, 12, 24]  # 안정적인 시장 - 긴 기간
+                base_grids = [15, 20, 25]
+            elif volatility_level == "낮음":
+                test_periods = [4, 6, 12]   # 약간 변동 - 중간 기간
+                base_grids = [18, 23, 28]
+            elif volatility_level == "보통":
+                test_periods = [2, 4, 6]    # 일반적인 변동 - 짧은 기간
+                base_grids = [20, 25, 30]
+            elif volatility_level == "높음":
+                test_periods = [1, 2, 4]    # 높은 변동 - 매우 짧은 기간
+                base_grids = [25, 30, 35]
+            else:  # 매우높음
+                test_periods = [0.5, 1, 2]  # 극심한 변동 - 초단기
+                base_grids = [30, 40, 50]
+            
             best_score = -1
-            best_period = 4  # 기본 4시간
-            best_grid_count = 15
+            best_period = test_periods[1]  # 기본값
+            best_grid_count = base_grids[1]  # 기본값
             
-            current_price = pyupbit.get_current_price(ticker)
-            if not current_price:
-                return best_period, best_grid_count
-                
-            for period in test_periods:
+            # 3단계: 각 기간별 최적화 테스트
+            for i, hours in enumerate(test_periods):
                 try:
-                    # 각 기간별로 가격 범위 계산 (시간 단위)
-                    high_price, low_price = calculate_price_range_hours(ticker, period)
-                    if high_price <= low_price:
+                    # 가격 범위 계산 (캐시 활용)
+                    high_price, low_price = self._get_cached_price_range(ticker, hours)
+                    if not high_price or not low_price:
                         continue
-                        
-                    # 변동성과 트렌드 분석
-                    price_range = high_price - low_price
-                    volatility = price_range / ((high_price + low_price) / 2)
                     
-                    # 현재가가 범위 내에 있는지 확인
-                    price_position = (current_price - low_price) / price_range if price_range > 0 else 0.5
-                    
-                    # 최적 그리드 개수 계산 (변동성과 가격 위치 기반)
-                    base_grid = self.get_coin_profile(ticker)["optimal_grid_base"]
-                    
-                    # 변동성에 따른 그리드 밀도 조정
-                    grid_density_factor = 1.0
-                    if volatility > 0.15:  # 높은 변동성
-                        grid_density_factor = 1.3
-                    elif volatility < 0.05:  # 낮은 변동성
-                        grid_density_factor = 0.8
-                        
-                    optimal_grid = int(base_grid * grid_density_factor * (1 + volatility * 0.5))
-                    optimal_grid = max(10, min(50, optimal_grid))  # 10-50 범위 제한
-                    
-                    # 백테스팅 점수 (간단한 시뮬레이션)
-                    backtest_score = self._simulate_grid_performance(ticker, period, optimal_grid, high_price, low_price)
-                    
-                    # 수익성 점수 계산
-                    # 1. 변동성 점수 (적당한 변동성이 좋음, 0.08-0.15가 이상적)
-                    optimal_volatility = 0.10
-                    volatility_score = 1 / (1 + abs(volatility - optimal_volatility) * 10)
-                    
-                    # 2. 가격 위치 점수 (중간에서 약간 아래가 좋음, 0.3-0.6이 이상적)
-                    ideal_position = 0.45
-                    position_score = 1 - abs(price_position - ideal_position) * 2
-                    position_score = max(0, position_score)
-                    
-                    # 3. 기간 점수 (2-6시간이 단타에 최적)
-                    if 2 <= period <= 6:
-                        period_score = 1.0
-                    else:
-                        period_score = 1 / (1 + abs(period - 4) * 0.1)
-                    
-                    # 4. 백테스팅 점수
-                    backtest_weight = 0.3
-                    
-                    # 종합 점수 (백테스팅 결과 포함)
-                    total_score = (
-                        volatility_score * 0.3 + 
-                        position_score * 0.25 + 
-                        period_score * 0.15 + 
-                        backtest_score * backtest_weight
+                    # 4단계: 동적 그리드 수 계산
+                    optimal_grid = self._calculate_dynamic_grid_count(
+                        ticker, high_price, low_price, base_grids[i], 
+                        volatility_level, trend_strength, volume_ratio
                     )
                     
-                    if total_score > best_score:
-                        best_score = total_score
-                        best_period = period
+                    # 5단계: 수익성 시뮬레이션
+                    simulation_score = self._advanced_profit_simulation(
+                        ticker, hours, optimal_grid, high_price, low_price,
+                        volatility_level, trend_strength, volume_ratio
+                    )
+                    
+                    if simulation_score > best_score:
+                        best_score = simulation_score
+                        best_period = hours
                         best_grid_count = optimal_grid
                         
                 except Exception as e:
+                    print(f"기간 {hours}h 최적화 실패: {e}")
                     continue
-                    
-            # 최적화 결과 로그 출력
-            coin_name = get_korean_coin_name(ticker)
-            print(f"🔍 {coin_name} 자동 최적화 완료: {best_period}시간 기간, 그리드 {best_grid_count}개 (점수: {best_score:.3f})")
             
+            # 6단계: 트렌드에 따른 최종 조정
+            best_grid_count = self._apply_trend_adjustment(best_grid_count, trend_strength, volume_ratio)
+            
+            print(f"🎯 {coin_name} 동적 최적화 완료: {best_period}시간, {best_grid_count}그리드 (점수: {best_score:.3f})")
             return best_period, best_grid_count
             
         except Exception as e:
@@ -572,61 +846,6 @@ class CoinSpecificGridManager:
             print(f"실시간 시장 데이터 수집 오류 ({ticker}): {e}")
             return {'volatility': 0, 'trend_strength': 0, 'volume_ratio': 1.0}
 
-# 완전 자동 거래 시스템
-class AutoTradingSystem:
-    def __init__(self):
-        self.risk_profiles = {
-            "보수적": {
-                "max_grid_count": 15,
-                "max_investment_ratio": 0.3,  # 총 자산의 30%만 투자
-                "panic_threshold": -3.0,  # 3% 하락시 급락 감지
-                "stop_loss_threshold": -5.0,  # 5% 손절
-                "trailing_stop_percent": 2.0,  # 2% 트레일링 스탑
-                "grid_confirmation_buffer": 0.2,  # 확인 버퍼 크게
-                "rebalance_threshold": 0.05  # 5% 변동시 리밸런싱
-            },
-            "안정적": {
-                "max_grid_count": 20,
-                "max_investment_ratio": 0.5,
-                "panic_threshold": -5.0,
-                "stop_loss_threshold": -8.0,
-                "trailing_stop_percent": 3.0,
-                "grid_confirmation_buffer": 0.15,
-                "rebalance_threshold": 0.08
-            },
-            "공격적": {
-                "max_grid_count": 30,
-                "max_investment_ratio": 0.7,
-                "panic_threshold": -7.0,
-                "stop_loss_threshold": -12.0,
-                "trailing_stop_percent": 4.0,
-                "grid_confirmation_buffer": 0.1,
-                "rebalance_threshold": 0.12
-            },
-            "극공격적": {
-                "max_grid_count": 50,
-                "max_investment_ratio": 0.9,
-                "panic_threshold": -10.0,
-                "stop_loss_threshold": -15.0,
-                "trailing_stop_percent": 5.0,
-                "grid_confirmation_buffer": 0.05,
-                "rebalance_threshold": 0.15
-            }
-        }
-        
-        self.performance_data = {
-            "total_trades": 0,
-            "winning_trades": 0,
-            "losing_trades": 0,
-            "total_profit": 0.0,
-            "max_drawdown": 0.0,
-            "last_optimization": None,
-            "hourly_performance": [],
-            "volatility_score": 0.0,
-            "trend_strength": 0.0,
-            "portfolio_risk": 0.0
-        }
-    
     def get_risk_settings(self, risk_mode):
         """리스크 모드에 따른 설정 반환"""
         return self.risk_profiles.get(risk_mode, self.risk_profiles["안정적"])
