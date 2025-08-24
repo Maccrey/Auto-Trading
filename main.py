@@ -1935,6 +1935,10 @@ class AutoOptimizationScheduler:
         timeframe_update_counter = 0
         timeframe_update_interval_cycles = max(1, 60 // interval_minutes)  # 1시간마다 시간대 업데이트
         
+        # 투자금 재분배를 위한 카운터
+        rebalance_counter = 0
+        rebalance_interval_cycles = max(1, 60 // interval_minutes)  # 1시간마다 재분배
+        
         while not self.stop_optimization:
             try:
                 # 먼저 설정된 간격만큼 대기
@@ -1957,6 +1961,16 @@ class AutoOptimizationScheduler:
                 
                 # 자동 거래 모드가 활성화된 경우에만 최적화 실행
                 if config.get('auto_trading_mode', False) and config.get('auto_optimization', True):
+                    # 1시간마다 지능형 투자금 재분배
+                    rebalance_counter += 1
+                    if rebalance_counter >= rebalance_interval_cycles:
+                        print("💰 지능형 투자금 재분배 실행...")
+                        try:
+                            self._perform_intelligent_rebalancing(update_callback)
+                        except Exception as e:
+                            print(f"❌ 투자금 재분배 오류: {e}")
+                        rebalance_counter = 0  # 카운터 리셋
+                    
                     # 1시간마다 최적 시간대 및 그리드 설정 업데이트
                     timeframe_update_counter += 1
                     if timeframe_update_counter >= timeframe_update_interval_cycles:
@@ -2131,6 +2145,146 @@ class AutoOptimizationScheduler:
             return 1000  # 임시값
         return 0
     
+    def _perform_intelligent_rebalancing(self, update_callback):
+        """지능형 투자금 재분배 수행"""
+        global coin_allocation_system
+        try:
+            print("🎯 지능형 투자금 재분배 시작...")
+            
+            # 활성 코인 목록 가져오기
+            active_coins = []
+            try:
+                # GUI에서 선택된 코인들 확인
+                if hasattr(self, 'get_selected_coins'):
+                    active_coins = self.get_selected_coins()
+                else:
+                    # 기본적으로 모든 코인 대상으로
+                    active_coins = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
+            except Exception as e:
+                print(f"활성 코인 목록 가져오기 오류: {e}")
+                active_coins = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
+            
+            if not active_coins:
+                print("❌ 활성 코인이 없어 재분배를 건너뜁니다")
+                return
+            
+            print(f"📊 대상 코인: {[coin.replace('KRW-', '') for coin in active_coins]}")
+            
+            # 현재 총 투자금 (실현 수익 포함)
+            base_investment = float(config.get('total_investment', 1000000))
+            total_available = calculate_total_investment_with_profits()
+            
+            print(f"💰 기본 투자금: {base_investment:,.0f}원")
+            print(f"💰 가용 총 자금 (수익 포함): {total_available:,.0f}원")
+            
+            # 지능형 분배 계산
+            new_allocations = coin_allocation_system.calculate_intelligent_allocation(
+                total_available, active_coins, include_profits=True
+            )
+            
+            if not new_allocations:
+                print("❌ 분배 계산 실패")
+                return
+            
+            # 분배 결과 로그
+            print("📊 새로운 투자금 분배:")
+            total_allocated = 0
+            for coin, amount in new_allocations.items():
+                coin_name = coin.replace('KRW-', '')
+                percentage = (amount / total_available) * 100
+                print(f"  - {coin_name}: {amount:,.0f}원 ({percentage:.1f}%)")
+                total_allocated += amount
+                
+            print(f"  - 총 분배: {total_allocated:,.0f}원")
+            print(f"  - 여유 자금: {total_available - total_allocated:,.0f}원")
+            
+            # 분배 변화량 체크 및 로깅 (모든 변화 기록)
+            has_significant_changes = False
+            print(f"🔄 재분배 분석 결과:")
+            for coin, new_amount in new_allocations.items():
+                old_amount = coin_allocation_system.get_coin_allocation(coin)
+                change = new_amount - old_amount
+                change_percent = (abs(change) / total_available) * 100 if total_available > 0 else 0
+                coin_name = coin.replace('KRW-', '')
+                
+                print(f"  🔍 {coin_name}: {old_amount:,.0f}원 → {new_amount:,.0f}원 ({change:+,.0f}원, {change:+.1f}%)")
+                
+                # 모든 재분배를 로그에 기록 (5% 이상 변화시에만 significant로 표시)
+                if change_percent > 5:  # 5% 이상 변화시
+                    has_significant_changes = True
+                    significance = "유의미한 변화"
+                    log_level = "재분배"
+                else:
+                    significance = "미미한 변화"
+                    log_level = "재분배확인"
+                
+                log_trade(coin, log_level, 
+                    f"{old_amount:,.0f}원 → {new_amount:,.0f}원 ({change:+,.0f}원)",
+                    f"지능형 분석 결과 {significance} - {change_percent:.1f}% 조정",
+                    {
+                        "coin_name": coin_name,
+                        "old_allocation": f"{old_amount:,.0f}원",
+                        "new_allocation": f"{new_amount:,.0f}원", 
+                        "change_amount": f"{change:+,.0f}원",
+                        "change_percent": f"{change:+.1f}%",
+                        "total_available": f"{total_available:,.0f}원",
+                        "significance": significance,
+                        "trigger": "1시간 자동 리밸런싱",
+                        "analysis_type": "지능형 분석"
+                    })
+            
+            if has_significant_changes:
+                print("✅ 유의미한 변화 감지 - 분배 업데이트 완료")
+                
+                # 재분배 완료 종합 로그 기록
+                total_new_allocated = sum(new_allocations.values())
+                spare_funds = total_available - total_new_allocated
+                
+                log_trade("SYSTEM", "재분배완료", f"총 {total_new_allocated:,.0f}원 재분배", 
+                    f"지능형 분석으로 {len(new_allocations)}개 코인 재분배 완료", {
+                        "total_available": f"{total_available:,.0f}원",
+                        "total_allocated": f"{total_new_allocated:,.0f}원",
+                        "spare_funds": f"{spare_funds:,.0f}원",
+                        "rebalanced_coins": len([coin for coin, amount in new_allocations.items() 
+                                               if abs(amount - coin_allocation_system.get_coin_allocation(coin)) > total_available * 0.05]),
+                        "trigger": "1시간 자동 리밸런싱",
+                        "analysis_method": "지능형 분석",
+                        "significant_changes": True
+                    })
+                
+                # 실제 분배 적용 (GUI 업데이트용)
+                if update_callback:
+                    try:
+                        update_callback({"type": "rebalance", "allocations": new_allocations})
+                    except Exception as cb_e:
+                        print(f"콜백 호출 오류: {cb_e}")
+                
+                # TTS 알림
+                try:
+                    speak_async("투자금 재분배가 완료되었습니다")
+                except:
+                    pass
+                    
+            else:
+                print("📊 변화량이 작아 현재 분배 유지")
+                
+                # 유지 상황도 로그에 기록
+                total_current_allocated = sum(new_allocations.values())
+                log_trade("SYSTEM", "분배유지", f"현재 분배 유지", 
+                    f"지능형 분석 결과 현재 분배가 최적으로 판단됨", {
+                        "total_available": f"{total_available:,.0f}원",
+                        "total_allocated": f"{total_current_allocated:,.0f}원",
+                        "trigger": "1시간 자동 리밸런싱",
+                        "analysis_method": "지능형 분석",
+                        "significant_changes": False,
+                        "reason": "모든 코인의 변화율이 5% 미만"
+                    })
+                
+        except Exception as e:
+            print(f"지능형 재분배 수행 중 오류: {e}")
+            import traceback
+            print(f"상세 오류: {traceback.format_exc()}")
+
     def _log_optimization_result(self, performance, new_config):
         """최적화 결과 로그"""
         risk_mode = new_config.get('risk_mode', '알 수 없음')
@@ -2641,21 +2795,30 @@ class CoinAllocationSystem:
             "KRW-BTC": {
                 "volatility_weight": 0.6,    # 안정성 중심
                 "min_allocation": 0.20,       # 최소 20% 분배
-                "max_allocation": 0.50        # 최대 50% 분배
+                "max_allocation": 0.50,       # 최대 50% 분배
+                "historical_performance": [],  # 과거 성과 기록
+                "last_profit_rate": 0.0       # 마지막 수익률
             },
             "KRW-ETH": {
                 "volatility_weight": 0.8,    # 중간 안정성
                 "min_allocation": 0.15,       # 최소 15% 분배
-                "max_allocation": 0.45        # 최대 45% 분배
+                "max_allocation": 0.45,       # 최대 45% 분배
+                "historical_performance": [],  # 과거 성과 기록
+                "last_profit_rate": 0.0       # 마지막 수익률
             },
             "KRW-XRP": {
                 "volatility_weight": 1.0,    # 고수익 추구
                 "min_allocation": 0.10,       # 최소 10% 분배
-                "max_allocation": 0.40        # 최대 40% 분배
+                "max_allocation": 0.40,       # 최대 40% 분배
+                "historical_performance": [],  # 과거 성과 기록
+                "last_profit_rate": 0.0       # 마지막 수익률
             }
         }
         self.allocation_cache = {}
         self.last_calculation_time = None
+        self.rebalance_interval = 3600  # 1시간마다 재분배
+        self.min_investment_amount = 5100  # 최소 투자 금액
+        self.realized_profits = {}  # 실현 수익 추적
     
     def analyze_coin_performance(self, ticker, period='1h'):
         """코인별 성과 분석"""
@@ -2716,91 +2879,195 @@ class CoinAllocationSystem:
             print(f"그리드 효율성 계산 오류 ({ticker}): {e}")
             return 0.5
     
-    def calculate_optimal_allocation(self, total_investment, active_coins, grid_configs):
-        """총 투자금을 코인별로 최적 분배"""
+    def get_realized_profits(self):
+        """실현 수익 조회"""
+        try:
+            profits_file = "data/profits.json"
+            if os.path.exists(profits_file):
+                with open(profits_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            print(f"실현 수익 조회 오류: {e}")
+            return {}
+
+    def update_historical_performance(self, ticker, profit_rate):
+        """과거 성과 업데이트"""
+        if ticker in self.coin_profiles:
+            self.coin_profiles[ticker]['historical_performance'].append({
+                'timestamp': datetime.now().isoformat(),
+                'profit_rate': profit_rate
+            })
+            # 최근 24개 기록만 유지 (24시간)
+            if len(self.coin_profiles[ticker]['historical_performance']) > 24:
+                self.coin_profiles[ticker]['historical_performance'] = \
+                    self.coin_profiles[ticker]['historical_performance'][-24:]
+            
+            self.coin_profiles[ticker]['last_profit_rate'] = profit_rate
+
+    def analyze_advanced_performance(self, ticker):
+        """고급 성과 분석 (과거 수익률, 변동성, 트렌드 종합)"""
+        try:
+            # 기본 성과 분석
+            basic_performance = self.analyze_coin_performance(ticker)
+            
+            # 과거 수익률 분석
+            historical_data = self.coin_profiles[ticker].get('historical_performance', [])
+            if len(historical_data) >= 3:  # 최소 3개 데이터 포인트 필요
+                profit_rates = [data['profit_rate'] for data in historical_data[-12:]]  # 최근 12시간
+                avg_profit_rate = sum(profit_rates) / len(profit_rates)
+                profit_consistency = 1.0 - (np.std(profit_rates) if len(profit_rates) > 1 else 0.5)
+            else:
+                avg_profit_rate = 0.0
+                profit_consistency = 0.5
+            
+            # 실현 수익 가중치
+            realized_profits = self.get_realized_profits()
+            total_realized = realized_profits.get(ticker, {}).get('total_profit', 0)
+            profit_weight = min(1.0, abs(total_realized) / 100000)  # 10만원 기준으로 정규화
+            
+            # 종합 점수 계산 (0.0 ~ 1.0)
+            composite_score = (
+                basic_performance['score'] * 0.3 +      # 기본 성과 30%
+                (avg_profit_rate + 0.5) * 0.3 +         # 과거 수익률 30% (정규화)
+                profit_consistency * 0.2 +               # 수익 일관성 20%
+                profit_weight * 0.2                      # 실현 수익 20%
+            )
+            
+            return {
+                'composite_score': max(0.1, min(1.0, composite_score)),
+                'basic_score': basic_performance['score'],
+                'avg_profit_rate': avg_profit_rate,
+                'profit_consistency': profit_consistency,
+                'realized_profit_weight': profit_weight,
+                'volatility': basic_performance['volatility'],
+                'trend': basic_performance['trend'],
+                'volume_ratio': basic_performance['volume_ratio']
+            }
+            
+        except Exception as e:
+            print(f"고급 성과 분석 오류 ({ticker}): {e}")
+            return {
+                'composite_score': 0.5,
+                'basic_score': 0.5,
+                'avg_profit_rate': 0.0,
+                'profit_consistency': 0.5,
+                'realized_profit_weight': 0.0,
+                'volatility': 0.05,
+                'trend': 0.0,
+                'volume_ratio': 1.0
+            }
+
+    def calculate_intelligent_allocation(self, total_investment, active_coins, include_profits=True):
+        """지능형 투자금 분배 (실현 수익 포함)"""
         try:
             current_time = datetime.now()
-            # 5분마다 재계산
+            
+            # 1시간마다 재계산
             if (self.last_calculation_time and 
-                (current_time - self.last_calculation_time).total_seconds() < 300):
+                (current_time - self.last_calculation_time).total_seconds() < self.rebalance_interval):
                 return self.allocation_cache
             
-            coin_scores = {}
+            print(f"🎯 지능형 투자금 분배 계산 시작...")
+            print(f"💰 총 투자금: {total_investment:,}원")
+            
+            # 실현 수익 포함한 총 가용 자금 계산
+            available_funds = total_investment
+            if include_profits:
+                realized_profits = self.get_realized_profits()
+                total_realized_profit = sum(
+                    profit_data.get('total_profit', 0) 
+                    for profit_data in realized_profits.values()
+                )
+                available_funds += total_realized_profit
+                if total_realized_profit != 0:
+                    print(f"📈 실현 수익 포함: {total_realized_profit:+,}원")
+                    print(f"💰 총 가용 자금: {available_funds:,}원")
+            
+            coin_performances = {}
             total_score = 0
             
-            # 각 코인별 점수 계산
+            # 각 코인별 고급 성과 분석
             for ticker in active_coins:
                 if ticker not in self.coin_profiles:
                     continue
                 
-                # 성과 분석
-                performance = self.analyze_coin_performance(ticker)
+                performance = self.analyze_advanced_performance(ticker)
+                coin_performances[ticker] = performance
+                total_score += performance['composite_score']
                 
-                # 그리드 설정 효율성
-                grid_info = grid_configs.get(ticker, {})
-                grid_count = grid_info.get('count', 20)
-                price_range = grid_info.get('range', 100000)
-                grid_efficiency = self.calculate_grid_efficiency(ticker, grid_count, price_range)
-                
-                # 코인 프로필 가중치
-                profile = self.coin_profiles[ticker]
-                volatility_factor = profile['volatility_weight']
-                
-                # 종합 점수 계산
-                composite_score = (
-                    performance['score'] * 0.5 +       # 성과 50%
-                    grid_efficiency * 0.3 +            # 그리드 효율성 30%
-                    volatility_factor * 0.2             # 코인 특성 20%
-                )
-                
-                coin_scores[ticker] = composite_score
-                total_score += composite_score
+                print(f"📊 {ticker}: 점수={performance['composite_score']:.3f}, "
+                      f"수익률={performance['avg_profit_rate']:+.2%}, "
+                      f"트렌드={performance['trend']:+.2%}")
             
-            # 분배 비율 계산
+            if total_score == 0:
+                # 균등 분배 (fallback)
+                equal_amount = available_funds / len(active_coins)
+                return {ticker: equal_amount for ticker in active_coins}
+            
             allocations = {}
-            remaining_investment = total_investment
             
+            # 점수 기반 초기 분배
             for ticker in active_coins:
-                if ticker not in coin_scores:
+                if ticker not in coin_performances:
                     continue
                 
                 profile = self.coin_profiles[ticker]
+                performance = coin_performances[ticker]
                 
-                if total_score > 0:
-                    # 점수 기반 초기 분배
-                    score_ratio = coin_scores[ticker] / total_score
-                    initial_allocation = total_investment * score_ratio
-                else:
-                    # 동일 분배
-                    initial_allocation = total_investment / len(active_coins)
+                # 점수 비례 분배
+                score_ratio = performance['composite_score'] / total_score
+                base_allocation = available_funds * score_ratio
                 
-                # 최소/최대 한도 적용
-                min_amount = total_investment * profile['min_allocation']
-                max_amount = total_investment * profile['max_allocation']
+                # 최소/최대 제약 적용
+                min_amount = available_funds * profile['min_allocation']
+                max_amount = available_funds * profile['max_allocation']
                 
-                final_allocation = max(min_amount, min(max_amount, initial_allocation))
+                # 최소 거래 금액 보장
+                min_amount = max(min_amount, self.min_investment_amount)
+                
+                final_allocation = max(min_amount, min(max_amount, base_allocation))
                 allocations[ticker] = final_allocation
-                remaining_investment -= final_allocation
+                
+                print(f"💰 {ticker}: {final_allocation:,.0f}원 "
+                      f"({final_allocation/available_funds*100:.1f}%)")
             
-            # 남은 투자금 재분배 (비례 분배)
-            if remaining_investment != 0 and allocations:
-                current_total = sum(allocations.values())
-                if current_total > 0:
-                    for ticker in allocations:
-                        ratio = allocations[ticker] / current_total
-                        allocations[ticker] += remaining_investment * ratio
+            # 총합이 가용 자금을 초과하지 않도록 조정
+            total_allocated = sum(allocations.values())
+            if total_allocated > available_funds:
+                adjustment_ratio = available_funds / total_allocated
+                for ticker in allocations:
+                    allocations[ticker] *= adjustment_ratio
+                    # 최소 금액 재보장
+                    if allocations[ticker] < self.min_investment_amount:
+                        allocations[ticker] = self.min_investment_amount
+                
+                print(f"⚖️ 총 분배금 조정: {total_allocated:,.0f}원 → {sum(allocations.values()):,.0f}원")
             
-            # 캐시 업데이트
+            # 남은 자금을 최고 점수 코인에 추가
+            remaining = available_funds - sum(allocations.values())
+            if remaining > 0:
+                best_coin = max(coin_performances.keys(), 
+                               key=lambda x: coin_performances[x]['composite_score'])
+                if allocations[best_coin] + remaining <= available_funds * self.coin_profiles[best_coin]['max_allocation']:
+                    allocations[best_coin] += remaining
+                    print(f"💎 잔여 자금 {remaining:,.0f}원을 최고 점수 {best_coin}에 추가")
+            
             self.allocation_cache = allocations
             self.last_calculation_time = current_time
             
+            print(f"✅ 지능형 분배 완료: 총 {sum(allocations.values()):,.0f}원")
             return allocations
             
         except Exception as e:
-            print(f"투자금 분배 계산 오류: {e}")
-            # 오류 시 동일 분배
-            equal_allocation = total_investment / max(1, len(active_coins))
-            return {ticker: equal_allocation for ticker in active_coins}
+            print(f"지능형 분배 계산 오류: {e}")
+            # Fallback: 균등 분배
+            equal_amount = max(self.min_investment_amount, total_investment / len(active_coins))
+            return {ticker: equal_amount for ticker in active_coins}
+
+    def calculate_optimal_allocation(self, total_investment, active_coins, grid_configs=None):
+        """기존 함수 호환성 유지 (내부적으로 지능형 분배 사용)"""
+        return self.calculate_intelligent_allocation(total_investment, active_coins)
     
     def get_allocation_info(self, ticker):
         """특정 코인의 분배 정보 반환"""
@@ -2858,6 +3125,67 @@ def calculate_total_investment_with_profits():
 
 # 전역 투자금 분배 시스템 인스턴스
 coin_allocation_system = CoinAllocationSystem()
+
+def test_intelligent_allocation():
+    """지능형 투자금 분배 시스템 테스트"""
+    try:
+        print("🧪 지능형 투자금 분배 시스템 테스트 시작...")
+        
+        # 테스트 시나리오 1: 100만원 분배
+        total_investment = 1000000
+        active_coins = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
+        
+        allocations = coin_allocation_system.calculate_intelligent_allocation(
+            total_investment, active_coins, include_profits=False
+        )
+        
+        print(f"\n📊 테스트 결과 (총 투자금: {total_investment:,.0f}원):")
+        total_allocated = 0
+        for coin, amount in allocations.items():
+            coin_name = coin.replace('KRW-', '')
+            percentage = (amount / total_investment) * 100
+            print(f"  - {coin_name}: {amount:,.0f}원 ({percentage:.1f}%)")
+            total_allocated += amount
+            
+            # 최소 투자금 조건 체크 (5100원 이상)
+            if amount < 5100:
+                print(f"    ⚠️  최소 투자금 미달 ({amount:,.0f}원 < 5,100원)")
+            else:
+                print(f"    ✅ 최소 투자금 조건 만족")
+        
+        print(f"\n  - 총 분배: {total_allocated:,.0f}원")
+        print(f"  - 여유 자금: {total_investment - total_allocated:,.0f}원")
+        
+        # 테스트 시나리오 2: 실현 수익 포함 테스트
+        print(f"\n🔄 실현 수익 포함 테스트...")
+        total_with_profits = calculate_total_investment_with_profits()
+        print(f"💰 실현 수익 포함 총 자금: {total_with_profits:,.0f}원")
+        
+        if total_with_profits > total_investment:
+            profit = total_with_profits - total_investment
+            print(f"💸 실현 수익: {profit:,.0f}원")
+            
+            allocations_with_profits = coin_allocation_system.calculate_intelligent_allocation(
+                total_with_profits, active_coins, include_profits=True
+            )
+            
+            print(f"\n📊 수익 포함 분배 결과:")
+            for coin, amount in allocations_with_profits.items():
+                old_amount = allocations.get(coin, 0)
+                change = amount - old_amount
+                coin_name = coin.replace('KRW-', '')
+                print(f"  - {coin_name}: {amount:,.0f}원 ({change:+,.0f}원 변화)")
+        else:
+            print("💰 실현 수익 없음 - 기본 분배와 동일")
+        
+        print("✅ 테스트 완료\n")
+        return True
+        
+    except Exception as e:
+        print(f"❌ 테스트 실패: {e}")
+        import traceback
+        print(f"상세 오류: {traceback.format_exc()}")
+        return False
 
 # 매수/매도 개수 추적
 trade_counts = {
@@ -4660,14 +4988,18 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 print(f"그리드 설정 수집 오류 ({coin}): {e}")
         
         # 투자금 자동 분배
-        allocations = coin_allocation_system.calculate_optimal_allocation(
-            total_investment, active_coins, grid_configs
+        # 실현 수익을 포함한 총 가용 자금 계산
+        total_available_funds = calculate_total_investment_with_profits()
+        
+        # 지능형 투자금 분배 시스템 사용
+        allocations = coin_allocation_system.calculate_intelligent_allocation(
+            total_available_funds, active_coins, include_profits=True
         )
         
         # 현재 코인의 분배된 투자금 사용
         allocated_investment = allocations.get(ticker, total_investment / len(active_coins) if active_coins else total_investment)
         
-        log_and_update('투자금분배', f"총 투자금: {total_investment:,.0f}원 중 {allocated_investment:,.0f}원 ({allocated_investment/total_investment*100:.1f}%) 분배")
+        log_and_update('투자금분배', f"총 가용자금: {total_available_funds:,.0f}원 중 {allocated_investment:,.0f}원 ({allocated_investment/total_available_funds*100:.1f}%) 분배")
         
         # GUI에 분배 정보 업데이트
         update_gui('allocation_info')
@@ -4783,10 +5115,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 except Exception as e:
                     print(f"그리드 설정 업데이트 오류 ({coin}): {e}")
             
-            # 투자금 재분배 (수익 포함 전체 투자금 기준)
+            # 지능형 투자금 재분배 (수익 포함 전체 투자금 기준)
             current_total_investment = calculate_total_investment_with_profits()
-            new_allocations = coin_allocation_system.rebalance_allocations(
-                current_total_investment, active_coins, grid_configs
+            new_allocations = coin_allocation_system.calculate_intelligent_allocation(
+                current_total_investment, active_coins, include_profits=True
             )
             
             # 현재 코인의 새로운 분배 금액
@@ -6185,6 +6517,10 @@ def start_dashboard():
 
     total_profit_rate_label = ttk.Label(ticker_frame, text="총 실현수익률: (0.00%)", font=('Helvetica', 10, 'bold'), style="Black.TLabel")
     total_profit_rate_label.grid(row=len(tickers)*6 + 1, column=2, columnspan=2, sticky='w', padx=3, pady=5)
+    
+    # 지능형 분배 총자산 표시
+    allocation_label = ttk.Label(ticker_frame, text="배분된 총자산: 0원", font=('Helvetica', 10, 'bold'), style="Blue.TLabel")
+    allocation_label.grid(row=len(tickers)*6 + 2, column=0, columnspan=4, sticky='w', padx=3, pady=5)
 
     # 그리드 투자 설정
     settings_frame = ttk.LabelFrame(top_frame, text="🔧 그리드 투자 설정")
@@ -6583,6 +6919,59 @@ def start_dashboard():
             
             # 자동거래 상태 업데이트
             update_auto_status()
+            
+            # 지능형 투자금 분배 즉시 실행 (거래 시작 시)
+            print("💰 지능형 투자금 분배 초기화 중...")
+            try:
+                total_investment = float(config.get('total_investment', 1000000))
+                total_with_profits = calculate_total_investment_with_profits()
+                allocations = coin_allocation_system.calculate_intelligent_allocation(
+                    total_with_profits, selected_tickers, include_profits=True
+                )
+                
+                # GUI에 분배 정보 즉시 표시
+                total_allocated = sum(allocations.values())
+                allocation_label.config(text=f"배분된 총자산: {total_allocated:,.0f}원", style="Blue.TLabel")
+                
+                # 각 코인별 분배 정보 표시 및 로그 기록
+                print(f"📊 지능형 분배 결과 (총 가용자금: {total_with_profits:,.0f}원)")
+                for ticker in selected_tickers:
+                    allocated_amount = allocations.get(ticker, 0)
+                    coin_name = get_korean_coin_name(ticker)
+                    percentage = (allocated_amount / total_with_profits) * 100
+                    print(f"  💰 {coin_name}: {allocated_amount:,.0f}원 ({percentage:.1f}%)")
+                    
+                    # 거래 로그에도 분배 정보 기록
+                    log_trade(ticker, "초기분배", f"{allocated_amount:,.0f}원 ({percentage:.1f}%)", 
+                        "지능형 분석 기반 초기 투자금 분배", {
+                            "coin_name": coin_name,
+                            "allocated_amount": f"{allocated_amount:,.0f}원",
+                            "percentage": f"{percentage:.1f}%",
+                            "total_available": f"{total_with_profits:,.0f}원",
+                            "allocation_method": "지능형 분석",
+                            "trigger": "거래 시작"
+                        })
+                
+                print(f"✅ 총 {total_allocated:,.0f}원 지능형 분배 완료")
+                
+                # 전체 분배 완료 로그
+                spare_funds = total_with_profits - total_allocated
+                log_trade("SYSTEM", "분배완료", f"총 {total_allocated:,.0f}원 분배", 
+                    f"지능형 분배 시스템으로 {len(selected_tickers)}개 코인에 분배 완료", {
+                        "total_funds": f"{total_with_profits:,.0f}원",
+                        "total_allocated": f"{total_allocated:,.0f}원",
+                        "spare_funds": f"{spare_funds:,.0f}원",
+                        "coins_count": len(selected_tickers),
+                        "selected_coins": [get_korean_coin_name(t) for t in selected_tickers],
+                        "trigger": "거래 시작 시 초기 분배"
+                    })
+                
+            except Exception as e:
+                print(f"❌ 분배 초기화 오류: {e}")
+                log_trade("SYSTEM", "오류", f"분배 초기화 실패", f"지능형 분배 오류: {str(e)}", {
+                    "error": str(e),
+                    "trigger": "거래 시작 시 분배 오류"
+                })
             
             # 자동 모드에서 거래 시작 시 자동 최적화 스케줄러도 시작
             if config.get('auto_trading_mode', False):
@@ -7797,6 +8186,26 @@ def start_dashboard():
                     # 실제 사용된 기간이 있으면 그것을 사용, 없으면 기본값
                     actual_period_to_use = chart_data.get(ticker, ('', '', [], 0, 0, period_combo.get()))[5] if ticker in chart_data and len(chart_data.get(ticker, [])) >= 6 else period_combo.get()
                     update_chart(ticker, actual_period_to_use)
+                elif key == 'allocation_display':
+                    # 지능형 분배 현황 표시
+                    allocation_data, total_allocated = args[0]
+                    try:
+                        # 총 분배 금액 표시 업데이트
+                        if 'allocation_label' in globals() and allocation_label:
+                            allocation_label.config(text=f"배분된 총자산: {total_allocated:,.0f}원", style="Blue.TLabel")
+                        
+                        # 개별 코인 분배 정보 표시
+                        for coin_ticker, amount in allocation_data.items():
+                            if coin_ticker in status_labels:
+                                coin_name = coin_ticker.replace('KRW-', '')
+                                allocated_text = f"배분: {amount:,.0f}원"
+                                # 상태 라벨에 분배 정보 추가 (기존 상태 + 분배정보)
+                                current_text = status_labels[coin_ticker].cget('text')
+                                if '배분:' not in current_text:
+                                    new_text = f"{current_text} | {allocated_text}" if current_text else allocated_text
+                                    status_labels[coin_ticker].config(text=new_text)
+                    except Exception as allocation_error:
+                        print(f"분배 정보 GUI 업데이트 오류: {allocation_error}")
             except Exception as e:
                 print(f"GUI 업데이트 오류: {e}")
         root.after(100, process_gui_queue)
