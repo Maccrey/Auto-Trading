@@ -37,6 +37,237 @@ except Exception as e:
     print(f"TTS 엔진 초기화 오류: {e}")
     tts_engine = None
 
+# 중앙집중식 API 데이터 관리 시스템
+class CentralizedDataManager:
+    def __init__(self):
+        self.tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+        self.current_prices = {}  # 현재 가격
+        self.orderbooks = {}      # 호가 데이터
+        self.balances = {}        # 잔고 정보
+        self.ohlcv_data = {}      # OHLCV 데이터 (여러 timeframe)
+        self.last_update = {}     # 마지막 업데이트 시간
+        self.data_lock = threading.Lock()
+        self.stop_worker = False
+        self.worker_thread = None
+        
+        # 데이터 수집 주기 (초)
+        self.update_interval = 3
+        
+        # 초기화
+        self._initialize_data()
+        
+    def _initialize_data(self):
+        """데이터 구조 초기화"""
+        for ticker in self.tickers:
+            self.current_prices[ticker] = 0
+            self.orderbooks[ticker] = None
+            self.ohlcv_data[ticker] = {
+                'minute1': None,
+                'minute5': None,
+                'minute15': None,
+                'minute60': None
+            }
+            self.last_update[ticker] = datetime.now()
+            
+    def start_worker(self):
+        """데이터 수집 워커 시작"""
+        if self.worker_thread is None or not self.worker_thread.is_alive():
+            self.stop_worker = False
+            self.worker_thread = threading.Thread(target=self._data_collection_worker, daemon=True)
+            self.worker_thread.start()
+            print("🚀 중앙집중식 데이터 수집 워커 시작 (3초 간격)")
+    
+    def stop_data_worker(self):
+        """데이터 수집 워커 중지"""
+        self.stop_worker = True
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=5)
+        print("🛑 중앙집중식 데이터 수집 워커 중지")
+        
+    def _data_collection_worker(self):
+        """3초마다 모든 코인 데이터를 일괄 수집"""
+        while not self.stop_worker:
+            try:
+                start_time = time.time()
+                
+                # 1. 현재 가격 일괄 수집
+                self._collect_current_prices()
+                
+                # 2. 호가 데이터 일괄 수집
+                self._collect_orderbooks()
+                
+                # 3. OHLCV 데이터 수집 (더 긴 주기로)
+                self._collect_ohlcv_data()
+                
+                # 4. 잔고 정보 수집 (더 긴 주기로)
+                self._collect_balances()
+                
+                elapsed = time.time() - start_time
+                print(f"📊 데이터 수집 완료 ({elapsed:.2f}초)")
+                
+                # 3초 간격 유지
+                sleep_time = max(0, self.update_interval - elapsed)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                    
+            except Exception as e:
+                print(f"❌ 데이터 수집 오류: {e}")
+                time.sleep(self.update_interval)
+                
+    def _collect_current_prices(self):
+        """모든 코인 현재 가격 일괄 수집"""
+        try:
+            # 한 번의 API 호출로 모든 코인 가격 가져오기
+            prices = pyupbit.get_current_price(self.tickers)
+            
+            if prices:
+                with self.data_lock:
+                    if isinstance(prices, dict):
+                        for ticker in self.tickers:
+                            if ticker in prices and prices[ticker] is not None:
+                                self.current_prices[ticker] = prices[ticker]
+                                self.last_update[ticker] = datetime.now()
+                    else:  # 단일 티커인 경우
+                        if len(self.tickers) == 1:
+                            self.current_prices[self.tickers[0]] = prices
+                            self.last_update[self.tickers[0]] = datetime.now()
+                            
+        except Exception as e:
+            print(f"현재 가격 수집 오류: {e}")
+            
+    def _collect_orderbooks(self):
+        """모든 코인 호가 데이터 수집"""
+        try:
+            for ticker in self.tickers:
+                try:
+                    orderbook = pyupbit.get_orderbook(ticker)
+                    if orderbook:
+                        with self.data_lock:
+                            self.orderbooks[ticker] = orderbook
+                except:
+                    continue  # 개별 코인 오류시 건너뛰기
+                    
+        except Exception as e:
+            print(f"호가 데이터 수집 오류: {e}")
+            
+    def _collect_ohlcv_data(self):
+        """OHLCV 데이터 수집 (필요시에만)"""
+        try:
+            current_time = datetime.now()
+            
+            for ticker in self.tickers:
+                # 1분 간격으로 1분봉 업데이트
+                if (current_time - self.last_update.get(f"{ticker}_1m", datetime.min)).seconds >= 60:
+                    try:
+                        df = pyupbit.get_ohlcv(ticker, interval='minute1', count=60)
+                        if df is not None:
+                            with self.data_lock:
+                                self.ohlcv_data[ticker]['minute1'] = df
+                                self.last_update[f"{ticker}_1m"] = current_time
+                    except:
+                        continue
+                        
+                # 5분 간격으로 다른 timeframe 업데이트
+                if (current_time - self.last_update.get(f"{ticker}_5m", datetime.min)).seconds >= 300:
+                    try:
+                        # 5분봉
+                        df = pyupbit.get_ohlcv(ticker, interval='minute5', count=288)
+                        if df is not None:
+                            with self.data_lock:
+                                self.ohlcv_data[ticker]['minute5'] = df
+                                
+                        # 15분봉
+                        df = pyupbit.get_ohlcv(ticker, interval='minute15', count=96)
+                        if df is not None:
+                            with self.data_lock:
+                                self.ohlcv_data[ticker]['minute15'] = df
+                                
+                        # 1시간봉
+                        df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)
+                        if df is not None:
+                            with self.data_lock:
+                                self.ohlcv_data[ticker]['minute60'] = df
+                                
+                        self.last_update[f"{ticker}_5m"] = current_time
+                        
+                    except:
+                        continue
+                        
+        except Exception as e:
+            print(f"OHLCV 데이터 수집 오류: {e}")
+            
+    def _collect_balances(self):
+        """잔고 정보 수집 (30초마다)"""
+        try:
+            current_time = datetime.now()
+            if (current_time - self.last_update.get('balances', datetime.min)).seconds >= 30:
+                try:
+                    balances = pyupbit.get_balances()
+                    if balances:
+                        with self.data_lock:
+                            self.balances = {item['currency']: float(item['balance']) for item in balances}
+                            self.last_update['balances'] = current_time
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"잔고 수집 오류: {e}")
+    
+    # 데이터 접근 메서드들
+    def get_current_price(self, ticker):
+        """현재 가격 조회"""
+        with self.data_lock:
+            return self.current_prices.get(ticker, 0)
+            
+    def get_current_prices(self, tickers=None):
+        """여러 코인 현재 가격 조회"""
+        if tickers is None:
+            tickers = self.tickers
+        with self.data_lock:
+            return {ticker: self.current_prices.get(ticker, 0) for ticker in tickers}
+            
+    def get_orderbook(self, ticker):
+        """호가 데이터 조회"""
+        with self.data_lock:
+            return self.orderbooks.get(ticker)
+            
+    def get_ohlcv(self, ticker, interval='minute1', count=60):
+        """OHLCV 데이터 조회"""
+        interval_map = {
+            'minute1': 'minute1',
+            'minute5': 'minute5', 
+            'minute15': 'minute15',
+            'minute60': 'minute60'
+        }
+        
+        mapped_interval = interval_map.get(interval, 'minute1')
+        
+        with self.data_lock:
+            df = self.ohlcv_data.get(ticker, {}).get(mapped_interval)
+            if df is not None and len(df) >= count:
+                return df.tail(count)
+            return df
+            
+    def get_balance(self, currency='KRW'):
+        """잔고 조회"""
+        with self.data_lock:
+            return self.balances.get(currency, 0)
+            
+    def get_all_balances(self):
+        """전체 잔고 조회"""
+        with self.data_lock:
+            return self.balances.copy()
+            
+    def is_data_fresh(self, ticker, max_age_seconds=10):
+        """데이터 신선도 확인"""
+        with self.data_lock:
+            last_update = self.last_update.get(ticker, datetime.min)
+            age = (datetime.now() - last_update).seconds
+            return age <= max_age_seconds
+
+# 전역 데이터 매니저 인스턴스
+data_manager = CentralizedDataManager()
+
 def tts_worker():
     """TTS 큐의 메시지를 순차적으로 처리하는 작업자"""
     while True:
@@ -388,10 +619,10 @@ class AutoTradingSystem:
     def _analyze_market_volatility(self, ticker):
         """시장 변동성 실시간 분석"""
         try:
-            # 다양한 시간대 데이터 수집
-            df_1h = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)  # 24시간
-            df_15m = pyupbit.get_ohlcv(ticker, interval='minute15', count=96)  # 24시간
-            df_5m = pyupbit.get_ohlcv(ticker, interval='minute5', count=288)   # 24시간
+            # 다양한 시간대 데이터 수집 (중앙집중식 데이터 매니저 사용)
+            df_1h = data_manager.get_ohlcv(ticker, interval='minute60', count=24)  # 24시간
+            df_15m = data_manager.get_ohlcv(ticker, interval='minute15', count=96)  # 24시간
+            df_5m = data_manager.get_ohlcv(ticker, interval='minute5', count=288)   # 24시간
             
             if df_1h is None or df_15m is None or df_5m is None:
                 return {'volatility_level': '보통', 'trend_strength': 0, 'volume_ratio': 1.0}
@@ -811,10 +1042,10 @@ class AutoTradingSystem:
     def get_real_time_market_data(self, ticker):
         """실시간 시장 데이터 수집 및 분석"""
         try:
-            # 1시간 봉 데이터 24개 가져오기 (안전한 API 호출)
+            # 1시간 봉 데이터 24개 가져오기 (중앙집중식 데이터 매니저 사용)
             df = None
             try:
-                df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+                df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)
             except Exception as api_error:
                 print(f"시장 데이터 조회 예외 ({ticker}): {api_error}")
                 return {'volatility': 0, 'trend_strength': 0, 'volume_ratio': 1.0}
@@ -899,7 +1130,7 @@ class AutoTradingSystem:
             
             for ticker in tickers:
                 try:
-                    df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)
+                    df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)
                     if df is not None and len(df) > 1:
                         price_changes = df['close'].pct_change().abs()
                         volatility = price_changes.std() * 100
@@ -920,7 +1151,7 @@ class AutoTradingSystem:
             
             for ticker in tickers:
                 try:
-                    df = pyupbit.get_ohlcv(ticker, interval='minute60', count=12)
+                    df = data_manager.get_ohlcv(ticker, interval='minute60', count=12)
                     if df is not None and len(df) > 6:
                         recent_change = (df['close'].iloc[-1] - df['close'].iloc[-6]) / df['close'].iloc[-6]
                         trend_scores.append(abs(recent_change))
@@ -940,7 +1171,7 @@ class AutoTradingSystem:
             
             for ticker in ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']:
                 positions = load_trading_state(ticker, demo_mode=True)
-                current_price = pyupbit.get_current_price(ticker)
+                current_price = data_manager.get_current_price(ticker)
                 
                 if positions and current_price:
                     for pos in positions:
@@ -1532,7 +1763,7 @@ class AdvancedTechnicalAnalyzer:
         try:
             # 시장 데이터 가져오기
             if market_data is None:
-                df = pyupbit.get_ohlcv(ticker, interval="minute60", count=100)
+                df = data_manager.get_ohlcv(ticker, interval="minute60", count=100)
                 if df is None or len(df) < 50:
                     return {'signal': 'hold', 'strength': 0, 'confidence': 0}
             else:
@@ -1892,7 +2123,7 @@ class CoinAllocationSystem:
         """코인별 성과 분석"""
         try:
             # 가격 데이터 수집
-            df = pyupbit.get_ohlcv(ticker, interval='minute60', count=24)  # 최근 24시간
+            df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)  # 최근 24시간
             if df is None or df.empty:
                 return {'score': 0.5, 'volatility': 0.05, 'trend': 0}
             
@@ -2272,7 +2503,7 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
             return 0, 0
         
         try:
-            current_price = pyupbit.get_current_price(ticker)
+            current_price = data_manager.get_current_price(ticker)
         except Exception as e:
             print(f"자동 매도 가격 조회 오류: {e}")
             return 0, 0
@@ -2932,9 +3163,9 @@ def calculate_price_range_hours(ticker, hours):
             df = None
             try:
                 if hours <= 0.5:  # 30분 이하
-                    df = pyupbit.get_ohlcv(ticker, interval="minute3", count=10)  # 30분 = 10개 3분봉
+                    df = data_manager.get_ohlcv(ticker, interval="minute5", count=6)  # 30분 = 10개 3분봉
                 elif hours <= 1:
-                    df = pyupbit.get_ohlcv(ticker, interval="minute5", count=12)  # 1시간 = 12개 5분봉
+                    df = data_manager.get_ohlcv(ticker, interval="minute5", count=12)  # 1시간 = 12개 5분봉
                 elif hours <= 4:
                     df = pyupbit.get_ohlcv(ticker, interval="minute15", count=16)  # 4시간 = 16개 15분봉
                 elif hours <= 12:
@@ -3170,15 +3401,16 @@ def get_chart_data(ticker, period):
     """차트용 데이터 가져오기"""
     try:
         if period == "1시간":
-            df = pyupbit.get_ohlcv(ticker, interval="minute5", count=60)
+            df = data_manager.get_ohlcv(ticker, interval="minute5", count=60)
         elif period == "4시간":
-            df = pyupbit.get_ohlcv(ticker, interval="minute15", count=96)
+            df = data_manager.get_ohlcv(ticker, interval="minute15", count=96)
         elif period == "1일":
-            df = pyupbit.get_ohlcv(ticker, interval="minute60", count=48)
+            df = data_manager.get_ohlcv(ticker, interval="minute60", count=48)
         elif period == "7일":
+            # 일봉은 중앙 데이터 매니저에서 지원하지 않으므로 직접 API 호출
             df = pyupbit.get_ohlcv(ticker, interval="day", count=14)
         else:
-            df = pyupbit.get_ohlcv(ticker, interval="minute60", count=48)
+            df = data_manager.get_ohlcv(ticker, interval="minute60", count=48)
         
         return df
     except Exception as e:
@@ -3421,7 +3653,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     # 현재 가격 조회 재시도 (최대 3번)
     for attempt in range(3):
         try:
-            current_price = pyupbit.get_current_price(ticker)
+            current_price = data_manager.get_current_price(ticker)
             if current_price is not None:
                 print(f"   ✅ 현재 가격 조회 성공: {current_price:,.0f}원")
                 break
@@ -3519,7 +3751,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     # 자산 계산용 현재 가격 재시도
     for attempt in range(3):
         try:
-            current_price_for_calc = pyupbit.get_current_price(ticker)
+            current_price_for_calc = data_manager.get_current_price(ticker)
             if current_price_for_calc is not None:
                 print(f"   ✅ 자산 계산용 가격 조회 성공: {current_price_for_calc:,.0f}원")
                 break
@@ -3825,7 +4057,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         try:
             # API 호출을 안전하게 래핑
             try:
-                price = pyupbit.get_current_price(ticker)
+                price = data_manager.get_current_price(ticker)
             except Exception as api_error:
                 api_error_count += 1
                 print(f"가격 데이터 조회 예외 ({api_error_count}/{max_api_errors}): {api_error}")
@@ -5080,6 +5312,8 @@ def start_dashboard():
                     stop_event.set()
                 active_trades.clear()  # active_trades 딕셔너리 클리어
             stop_tts_worker()
+            # 중앙집중식 데이터 수집 워커 중지
+            data_manager.stop_data_worker()
             root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
@@ -6239,7 +6473,7 @@ def start_dashboard():
         
         # 실시간 현재 가격 표시
         try:
-            current_price = pyupbit.get_current_price(ticker)
+            current_price = data_manager.get_current_price(ticker)
             if current_price and len(df) > 0:
                 # 현재 가격 수평선 표시
                 ax.axhline(y=current_price, color='orange', linestyle='-', alpha=0.8, linewidth=2, label=f'현재가 ({current_price:,.0f})')
@@ -6283,7 +6517,7 @@ def start_dashboard():
             
             # 그리드 라인 및 현재 가격과의 관계 표시
             try:
-                current_price = pyupbit.get_current_price(ticker)
+                current_price = data_manager.get_current_price(ticker)
                 for i, level in enumerate(grid_levels):
                     # 현재 가격과 그리드 라인의 관계에 따라 색상 변경
                     if current_price:
@@ -6663,6 +6897,8 @@ def start_dashboard():
 
 if __name__ == "__main__":
     initialize_files()
+    # 중앙집중식 데이터 수집 워커 시작
+    data_manager.start_worker()
     # 앱 시작 시 거래 횟수 초기화 (기존 로그 기반으로)
     initialize_trade_counts_from_logs()
     start_dashboard()
