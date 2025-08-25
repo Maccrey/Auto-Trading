@@ -1443,10 +1443,7 @@ class AutoTradingSystem:
                 print(f"✅ {coin_name}: {optimal_period}일/{optimal_grid}그리드")
                 
                 # 결과 저장
-                optimization_results[ticker] = {
-                    'period': optimal_period,
-                    'grid_count': optimal_grid
-                }
+                optimization_results[ticker] = (optimal_period, optimal_grid)
                 
                 # config에도 업데이트 (차트 제목 반영용)
                 if 'coin_specific_grids' not in config:
@@ -1456,6 +1453,36 @@ class AutoTradingSystem:
                     
                 config['coin_specific_grids'][ticker]['price_range_hours'] = optimal_period
                 config['coin_specific_grids'][ticker]['grid_count'] = optimal_grid
+                
+                # 즉시 차트 업데이트 - 최적화 시점에 실시간 반영
+                try:
+                    if 'chart_data' in globals() and 'update_chart' in globals():
+                        # 최적화된 설정으로 새 가격 범위 계산
+                        high_price, low_price = calculate_price_range_hours(ticker, optimal_period * 24)  # 일수를 시간으로 변환
+                        
+                        if high_price and low_price and high_price > low_price:
+                            # 그리드 레벨 재계산
+                            price_gap = (high_price - low_price) / optimal_grid
+                            grid_levels = [low_price + (price_gap * i) for i in range(optimal_grid + 1)]
+                            
+                            # 기존 투자금액 유지
+                            allocated_amount = 100000  # 기본값
+                            if ticker in globals()['chart_data']:
+                                allocated_amount = globals()['chart_data'][ticker][4] if len(globals()['chart_data'][ticker]) > 4 else allocated_amount
+                            
+                            # chart_data 업데이트
+                            globals()['chart_data'][ticker] = (high_price, low_price, grid_levels, optimal_grid, allocated_amount, optimal_period)
+                            
+                            # 차트 즉시 업데이트
+                            globals()['update_chart'](ticker, optimal_period)
+                            print(f"📊 {coin_name} 차트 실시간 업데이트 - {optimal_period}일/{optimal_grid}그리드")
+                            
+                            # 로그 기록
+                            if 'log_trade' in globals():
+                                globals()['log_trade'](ticker, '그리드최적화', f'{coin_name} 실시간 최적화: {optimal_period}일 범위, {optimal_grid}개 그리드')
+                            
+                except Exception as e:
+                    print(f"⚠️ {coin_name} 차트 실시간 업데이트 오류: {e}")
                 
             except Exception as e:
                 print(f"❌ {ticker} 최적화 실패: {e}")
@@ -2047,6 +2074,43 @@ class AutoOptimizationScheduler:
                 config['last_optimization'] = datetime.now().isoformat()
                 save_config(config)
                 
+                # 실시간 차트 업데이트 - 최적화된 설정으로 즉시 반영
+                try:
+                    print("🔄 최적화 후 차트 실시간 업데이트 시작...")
+                    for ticker, result in results.items():
+                        optimal_period, optimal_grid = result
+                        coin_name = get_korean_coin_name(ticker)
+                        
+                        # 글로벌 chart_data 업데이트
+                        if 'chart_data' in globals():
+                            # 최적화된 설정으로 새 가격 범위 계산
+                            high_price, low_price = calculate_price_range_hours(ticker, optimal_period * 24)  # 일수를 시간으로 변환
+                            
+                            if high_price and low_price and high_price > low_price:
+                                # 그리드 레벨 재계산
+                                price_gap = (high_price - low_price) / optimal_grid
+                                grid_levels = [low_price + (price_gap * i) for i in range(optimal_grid + 1)]
+                                
+                                # 기존 투자금액 유지 또는 기본값 사용
+                                allocated_amount = 100000  # 기본값
+                                if ticker in globals()['chart_data']:
+                                    allocated_amount = globals()['chart_data'][ticker][4] if len(globals()['chart_data'][ticker]) > 4 else allocated_amount
+                                
+                                # chart_data 업데이트
+                                globals()['chart_data'][ticker] = (high_price, low_price, grid_levels, optimal_grid, allocated_amount, optimal_period)
+                                
+                                # 차트 즉시 업데이트
+                                if 'update_chart' in globals():
+                                    globals()['update_chart'](ticker, optimal_period)
+                                    print(f"📊 {coin_name} 차트 업데이트 완료 - {optimal_period}일/{optimal_grid}그리드")
+                                
+                                # 그리드 최적화 로그 기록
+                                if 'log_trade' in globals():
+                                    globals()['log_trade'](ticker, '그리드최적화', f'{coin_name} 자동 최적화: {optimal_period}일 범위, {optimal_grid}개 그리드')
+                            
+                except Exception as chart_error:
+                    print(f"⚠️ 차트 업데이트 오류: {chart_error}")
+                
                 # UI 업데이트 콜백 호출
                 if update_callback:
                     update_callback(config)
@@ -2258,6 +2322,35 @@ class AutoOptimizationScheduler:
                         update_callback({"type": "rebalance", "allocations": new_allocations})
                     except Exception as cb_e:
                         print(f"콜백 호출 오류: {cb_e}")
+                
+                # GUI 실시간 업데이트 - 투자금 재분배 반영
+                try:
+                    print("🔄 투자금 재분배 GUI 업데이트 시작...")
+                    
+                    # 전역 GUI 큐에 분배 정보 업데이트 추가
+                    if 'gui_queue' in globals():
+                        total_reallocated = sum(new_allocations.values())
+                        globals()['gui_queue'].put(('allocation_display', 'SYSTEM', (new_allocations, total_reallocated)))
+                        
+                        # 각 코인별로 개별 분배 정보 업데이트
+                        for ticker, amount in new_allocations.items():
+                            coin_name = get_korean_coin_name(ticker)
+                            allocation_text = f"재분배: {amount:,.0f}원"
+                            
+                            # 상태 라벨에 실시간 분배 정보 반영
+                            globals()['gui_queue'].put(('status', ticker, (f"상태: {coin_name} 재분배 완료", "Green.TLabel", False, False)))
+                            globals()['gui_queue'].put(('allocation_status', ticker, allocation_text))
+                        
+                        print("✅ 투자금 재분배 GUI 실시간 업데이트 완료")
+                    
+                    # allocation_label 직접 업데이트
+                    if 'allocation_label' in globals():
+                        total_reallocated = sum(new_allocations.values())
+                        globals()['allocation_label'].config(text=f"재분배된 총자산: {total_reallocated:,.0f}원", style="Green.TLabel")
+                        print(f"📊 총자산 라벨 업데이트: {total_reallocated:,.0f}원")
+                    
+                except Exception as gui_error:
+                    print(f"⚠️ 투자금 재분배 GUI 업데이트 오류: {gui_error}")
                 
                 # TTS 알림
                 try:
@@ -3044,14 +3137,47 @@ class CoinAllocationSystem:
                 
                 print(f"⚖️ 총 분배금 조정: {total_allocated:,.0f}원 → {sum(allocations.values()):,.0f}원")
             
-            # 남은 자금을 최고 점수 코인에 추가
+            # 남은 자금을 모든 코인에 비례 분배 (max_allocation 제약 내에서)
             remaining = available_funds - sum(allocations.values())
             if remaining > 0:
-                best_coin = max(coin_performances.keys(), 
-                               key=lambda x: coin_performances[x]['composite_score'])
-                if allocations[best_coin] + remaining <= available_funds * self.coin_profiles[best_coin]['max_allocation']:
-                    allocations[best_coin] += remaining
-                    print(f"💎 잔여 자금 {remaining:,.0f}원을 최고 점수 {best_coin}에 추가")
+                print(f"⚖️ 남은 자금 {remaining:,.0f}원 재분배 시작...")
+                
+                # 각 코인의 추가 수용 가능 금액 계산
+                available_capacities = {}
+                total_capacity = 0
+                
+                for ticker in allocations.keys():
+                    max_capacity = available_funds * self.coin_profiles[ticker]['max_allocation']
+                    current_allocation = allocations[ticker]
+                    additional_capacity = max(0, max_capacity - current_allocation)
+                    available_capacities[ticker] = additional_capacity
+                    total_capacity += additional_capacity
+                    
+                # 수용 가능한 코인이 있으면 비례 분배
+                if total_capacity > 0:
+                    remaining_to_distribute = min(remaining, total_capacity)
+                    
+                    for ticker in allocations.keys():
+                        capacity = available_capacities[ticker]
+                        if capacity > 0:
+                            capacity_ratio = capacity / total_capacity
+                            additional_amount = remaining_to_distribute * capacity_ratio
+                            allocations[ticker] += additional_amount
+                            print(f"💰 {ticker}: +{additional_amount:,.0f}원 추가 분배")
+                    
+                    # 여전히 남은 자금이 있으면 모든 코인에 균등 추가 (최소한으로)
+                    final_remaining = remaining - remaining_to_distribute
+                    if final_remaining > 0:
+                        per_coin_addition = final_remaining / len(allocations)
+                        for ticker in allocations.keys():
+                            allocations[ticker] += per_coin_addition
+                            print(f"💎 {ticker}: +{per_coin_addition:,.0f}원 균등 추가 분배")
+                else:
+                    # 모든 코인이 최대치에 도달했다면 균등 추가 분배
+                    per_coin_addition = remaining / len(allocations)
+                    for ticker in allocations.keys():
+                        allocations[ticker] += per_coin_addition
+                        print(f"🎯 {ticker}: +{per_coin_addition:,.0f}원 강제 균등 분배")
             
             self.allocation_cache = allocations
             self.last_calculation_time = current_time
@@ -5775,17 +5901,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             # 총자산 = 초기 투자금 + 실현수익 + 평가수익
             total_value = start_balance + ticker_realized_profit + unrealized_profit
             
-            # 전체 수익 = 실현수익 + 평가수익  
-            profit = ticker_realized_profit + unrealized_profit
+            # 보유코인수익 = 평가수익만 (현재 보유 코인의 수익)
+            profit = unrealized_profit
             
-            # 전체 수익률 계산
-            profit_percent = (profit / start_balance) * 100 if start_balance > 0 else 0
+            # 보유코인수익률 계산 (평가수익 기준)
+            profit_percent = (profit / invested_amount) * 100 if invested_amount > 0 else 0
             
             # 코인 보유량이 0일 때 평가수익도 0으로 처리
             if coin_quantity == 0:
                 unrealized_profit = 0
                 held_value = 0
-                profit = ticker_realized_profit  # 실현수익만
+                profit = 0  # 보유코인수익은 0 (보유 코인이 없으므로)
                 total_value = start_balance + ticker_realized_profit  # 초기금 + 실현수익
                 
             realized_profit_percent = (ticker_realized_profit / total_investment) * 100 if total_investment > 0 else 0
@@ -8111,16 +8237,16 @@ def start_dashboard():
                     else:
                         # 기존 호환성 유지
                         cash, coin_qty, held_value, total_value, profit, profit_percent, total_realized_profit, realized_profit_percent = args
-                        unrealized_profit = profit - total_realized_profit
-                        unrealized_profit_percent = 0
+                        unrealized_profit = profit  # profit는 이제 평가수익만 포함
+                        unrealized_profit_percent = profit_percent
                     
                     # 코인 보유량이 0일 때 평가수익을 0으로 강제 설정
                     if coin_qty == 0:
                         held_value = 0
                         unrealized_profit = 0
                         unrealized_profit_percent = 0
-                        profit = total_realized_profit  # 실현수익만
-                        profit_percent = realized_profit_percent
+                        profit = 0  # 보유코인수익은 0 (보유 코인이 없으므로)
+                        profit_percent = 0.0
                     
                     profit_style = get_profit_color_style(profit)
                     realized_profit_style = get_profit_color_style(total_realized_profit)
@@ -8192,20 +8318,41 @@ def start_dashboard():
                     try:
                         # 총 분배 금액 표시 업데이트
                         if 'allocation_label' in globals() and allocation_label:
-                            allocation_label.config(text=f"배분된 총자산: {total_allocated:,.0f}원", style="Blue.TLabel")
+                            allocation_label.config(text=f"재분배된 총자산: {total_allocated:,.0f}원", style="Green.TLabel")
                         
                         # 개별 코인 분배 정보 표시
                         for coin_ticker, amount in allocation_data.items():
                             if coin_ticker in status_labels:
                                 coin_name = coin_ticker.replace('KRW-', '')
-                                allocated_text = f"배분: {amount:,.0f}원"
-                                # 상태 라벨에 분배 정보 추가 (기존 상태 + 분배정보)
+                                allocated_text = f"재분배: {amount:,.0f}원"
+                                # 상태 라벨에 분배 정보 추가/업데이트 (기존 상태 + 분배정보)
                                 current_text = status_labels[coin_ticker].cget('text')
-                                if '배분:' not in current_text:
+                                if '배분:' in current_text or '재분배:' in current_text:
+                                    # 기존 분배 정보가 있으면 업데이트
+                                    import re
+                                    updated_text = re.sub(r'(배분|재분배): \d{1,3}(?:,\d{3})*원', allocated_text, current_text)
+                                    status_labels[coin_ticker].config(text=updated_text)
+                                else:
+                                    # 새로운 분배 정보 추가
                                     new_text = f"{current_text} | {allocated_text}" if current_text else allocated_text
                                     status_labels[coin_ticker].config(text=new_text)
                     except Exception as allocation_error:
                         print(f"분배 정보 GUI 업데이트 오류: {allocation_error}")
+                elif key == 'allocation_status':
+                    # 개별 코인 분배 상태 업데이트
+                    try:
+                        allocation_text = args[0] if args else ""
+                        if ticker in status_labels:
+                            current_text = status_labels[ticker].cget('text')
+                            # 기존 분배 정보 교체
+                            import re
+                            if '배분:' in current_text or '재분배:' in current_text:
+                                updated_text = re.sub(r'(배분|재분배): \d{1,3}(?:,\d{3})*원', allocation_text, current_text)
+                            else:
+                                updated_text = f"{current_text} | {allocation_text}" if current_text else allocation_text
+                            status_labels[ticker].config(text=updated_text)
+                    except Exception as alloc_status_error:
+                        print(f"개별 분배 상태 업데이트 오류: {alloc_status_error}")
             except Exception as e:
                 print(f"GUI 업데이트 오류: {e}")
         root.after(100, process_gui_queue)
