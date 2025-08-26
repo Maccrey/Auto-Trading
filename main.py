@@ -81,11 +81,20 @@ class CentralizedDataManager:
         """데이터 수집 워커 중지"""
         self.stop_worker = True
         if self.worker_thread and self.worker_thread.is_alive():
-            self.worker_thread.join(timeout=5)
-        print("🛑 중앙집중식 데이터 수집 워커 중지")
+            print("🛑 데이터 수집 워커 중지 중...")
+            self.worker_thread.join(timeout=10)
+            if self.worker_thread.is_alive():
+                print("⚠️ 데이터 수집 워커가 정상 종료되지 않음")
+            else:
+                print("✅ 데이터 수집 워커 정상 종료")
+        else:
+            print("🛑 중앙집중식 데이터 수집 워커 중지")
         
     def _data_collection_worker(self):
         """3초마다 모든 코인 데이터를 일괄 수집"""
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+        
         while not self.stop_worker:
             try:
                 start_time = time.time()
@@ -102,8 +111,12 @@ class CentralizedDataManager:
                 # 4. 잔고 정보 수집 (더 긴 주기로)
                 self._collect_balances()
                 
+                # 성공 시 오류 카운터 리셋
+                consecutive_errors = 0
+                
                 elapsed = time.time() - start_time
-                print(f"📊 데이터 수집 완료 ({elapsed:.2f}초)")
+                if elapsed > 0.5:  # 0.5초 이상 걸린 경우만 로그 출력
+                    print(f"📊 데이터 수집 완료 ({elapsed:.2f}초)")
                 
                 # 3초 간격 유지
                 sleep_time = max(0, self.update_interval - elapsed)
@@ -111,8 +124,36 @@ class CentralizedDataManager:
                     time.sleep(sleep_time)
                     
             except Exception as e:
-                print(f"❌ 데이터 수집 오류: {e}")
-                time.sleep(self.update_interval)
+                consecutive_errors += 1
+                error_type = type(e).__name__
+                
+                # API 제한 오류와 네트워크 오류 구분
+                if "requests" in str(type(e)).lower() or "connection" in str(e).lower():
+                    error_category = "네트워크"
+                elif "limit" in str(e).lower() or "rate" in str(e).lower():
+                    error_category = "API_제한"
+                else:
+                    error_category = "일반"
+                
+                print(f"❌ 데이터 수집 오류 ({consecutive_errors}/{max_consecutive_errors}) [{error_category}]: {error_type} - {str(e)[:100]}")
+                
+                # 연속 오류가 너무 많으면 더 긴 대기
+                if consecutive_errors >= max_consecutive_errors:
+                    print(f"⚠️ 연속 오류가 {max_consecutive_errors}회 발생. 60초 대기 후 재시도...")
+                    time.sleep(60)
+                    consecutive_errors = 0
+                else:
+                    # 오류 유형에 따라 다른 대기 시간
+                    if error_category == "API_제한":
+                        wait_time = 30  # API 제한 시 30초 대기
+                    elif error_category == "네트워크":
+                        wait_time = 10  # 네트워크 오류 시 10초 대기
+                    else:
+                        wait_time = min(5 * consecutive_errors, 30)
+                    
+                    time.sleep(wait_time)
+        
+        print("🔚 데이터 수집 워커 정상 종료")
                 
     def _collect_current_prices(self):
         """모든 코인 현재 가격 일괄 수집"""
@@ -320,7 +361,7 @@ def tts_worker():
     """TTS 큐의 메시지를 순차적으로 처리하는 작업자"""
     while True:
         try:
-            text = tts_queue.get()
+            text = tts_queue.get(timeout=2)  # 2초 타임아웃 추가
             if text is None: # 종료 신호
                 break
             with tts_lock:
@@ -329,7 +370,23 @@ def tts_worker():
                     tts_engine.runAndWait()
             tts_queue.task_done()
         except Exception as e:
-            print(f"TTS 작업자 오류: {e}")
+            if "Empty" not in str(e):
+                print(f"TTS 작업자 오류: {e}")
+
+def cleanup_tts_queue():
+    """TTS 큐 크기 제한"""
+    MAX_TTS_QUEUE_SIZE = 10
+    if tts_queue.qsize() > MAX_TTS_QUEUE_SIZE:
+        # 큐가 너무 크면 기존 메시지들을 제거
+        cleared_count = 0
+        while tts_queue.qsize() > 5:  # 5개까지 줄임
+            try:
+                tts_queue.get_nowait()
+                cleared_count += 1
+            except:
+                break
+        if cleared_count > 0:
+            print(f"🧹 TTS 큐 정리: {cleared_count}개 메시지 제거")
 
 def get_korean_coin_name(ticker):
     """코인 티커를 한국어 이름으로 변환"""
@@ -415,6 +472,8 @@ def analyze_market_condition(ticker, current_price, recent_prices, high_price, l
 def speak_async(text, repeat=1):
     """TTS 큐에 메시지를 추가 (논블로킹)"""
     if tts_engine and config.get('tts_enabled', True):
+        # TTS 큐 크기 제한
+        cleanup_tts_queue()
         for _ in range(repeat):
             tts_queue.put(text)
 
@@ -428,8 +487,91 @@ def start_tts_worker():
 def stop_tts_worker():
     """TTS 작업자 스레드 종료"""
     if tts_worker_thread and tts_worker_thread.is_alive():
+        print("🛑 TTS 워커 중지 중...")
         tts_queue.put(None) # 종료 신호
-        tts_worker_thread.join(timeout=2)
+        tts_worker_thread.join(timeout=5)
+        if tts_worker_thread.is_alive():
+            print("⚠️ TTS 워커가 정상 종료되지 않음")
+        else:
+            print("✅ TTS 워커 정상 종료")
+
+def safe_shutdown_all_threads():
+    """모든 스레드를 안전하게 종료"""
+    print("🔄 모든 스레드 안전 종료 시작...")
+    
+    try:
+        # 1. 자동 최적화 스케줄러 중지
+        if 'auto_scheduler' in globals():
+            auto_scheduler.stop_auto_optimization()
+    except Exception as e:
+        print(f"자동 최적화 스케줄러 종료 오류: {e}")
+    
+    try:
+        # 2. 데이터 매니저 중지
+        if 'data_manager' in globals():
+            data_manager.stop_data_worker()
+    except Exception as e:
+        print(f"데이터 매니저 종료 오류: {e}")
+    
+    try:
+        # 3. TTS 워커 중지
+        stop_tts_worker()
+    except Exception as e:
+        print(f"TTS 워커 종료 오류: {e}")
+    
+    try:
+        # 4. GUI 큐 정리
+        if 'gui_queue' in globals() and globals()['gui_queue'] is not None:
+            while not globals()['gui_queue'].empty():
+                try:
+                    globals()['gui_queue'].get_nowait()
+                except:
+                    break
+            print("✅ GUI 큐 정리 완료")
+    except Exception as e:
+        print(f"GUI 큐 정리 오류: {e}")
+    
+    try:
+        # 5. 캐시 정리
+        cleanup_expired_cache()
+        print("✅ 캐시 정리 완료")
+    except Exception as e:
+        print(f"캐시 정리 오류: {e}")
+    
+    print("✅ 모든 스레드 안전 종료 완료")
+
+def aggressive_memory_cleanup():
+    """공격적 메모리 정리"""
+    try:
+        import gc
+        
+        # 1. 캐시 완전 정리
+        cleanup_expired_cache()
+        if len(price_range_cache) > 50:  # 50개 이상이면 강제 정리
+            price_range_cache.clear()
+            cache_timeout.clear()
+            print("🧹 가격 범위 캐시 완전 정리")
+        
+        # 2. TTS 큐 정리
+        cleanup_tts_queue()
+        
+        # 3. 글로벌 변수들 정리
+        try:
+            if 'coin_grid_manager' in globals():
+                if hasattr(coin_grid_manager, 'timeframe_analysis_cache'):
+                    coin_grid_manager.timeframe_analysis_cache.clear()
+                    print("🧹 시간대 분석 캐시 정리")
+        except:
+            pass
+        
+        # 4. 가비지 컬렉션 강제 실행
+        collected = gc.collect()
+        print(f"🧹 가비지 컬렉션: {collected}개 객체 정리")
+        
+        return True
+    except Exception as e:
+        print(f"메모리 정리 오류: {e}")
+        return False
 
 
 # 데이터 폴더 및 파일 관리
@@ -1988,23 +2130,33 @@ class AutoOptimizationScheduler:
         
     def stop_auto_optimization(self):
         """자동 최적화 스레드 중지"""
+        print("🛑 자동 최적화 스레드 중지 중...")
         self.stop_optimization = True
-        if self.optimization_thread:
-            self.optimization_thread.join(timeout=5)
+        if self.optimization_thread and self.optimization_thread.is_alive():
+            self.optimization_thread.join(timeout=15)
+            if self.optimization_thread.is_alive():
+                print("⚠️ 자동 최적화 스레드가 정상 종료되지 않음")
+            else:
+                print("✅ 자동 최적화 스레드 정상 종료")
+        else:
+            print("✅ 자동 최적화 스레드 이미 종료됨")
     
     def _optimization_worker(self, update_callback):
         """자동 최적화 작업자"""
+        global config
         interval_minutes = config.get('auto_update_interval', 15)
         print(f"🤖 자동 최적화 워커 시작 - {interval_minutes}분 간격으로 실행")
         print(f"⏰ 첫 번째 자동 최적화까지 {interval_minutes}분 대기...")
         
-        # 동적 시간대 업데이트를 위한 카운터
+        # 동적 시간대 업데이트를 위한 카운터 (자동 최적화 간격 사용)
         timeframe_update_counter = 0
-        timeframe_update_interval_cycles = max(1, 60 // interval_minutes)  # 1시간마다 시간대 업데이트
+        timeframe_update_interval_cycles = 1  # 매 자동 최적화 간격마다 시간대 업데이트
+        print(f"🔧 시간대 업데이트 주기: {timeframe_update_interval_cycles}회 마다 (자동 최적화 간격: {interval_minutes}분)")
         
         # 투자금 재분배를 위한 카운터
         rebalance_counter = 0
         rebalance_interval_cycles = max(1, 60 // interval_minutes)  # 1시간마다 재분배
+        print(f"🔧 재분배 주기: {rebalance_interval_cycles}회 마다")
         
         while not self.stop_optimization:
             try:
@@ -2027,9 +2179,14 @@ class AutoOptimizationScheduler:
                 print(f"  - 자동 최적화: {config.get('auto_optimization', True)}")
                 
                 # 자동 거래 모드가 활성화된 경우에만 최적화 실행
-                if config.get('auto_trading_mode', False) and config.get('auto_optimization', True):
+                auto_trading_enabled = config.get('auto_trading_mode', False)
+                auto_optimization_enabled = config.get('auto_optimization', True)
+                print(f"📋 자동 모드 상태: 거래={auto_trading_enabled}, 최적화={auto_optimization_enabled}")
+                
+                if auto_trading_enabled and auto_optimization_enabled:
                     # 1시간마다 지능형 투자금 재분배
                     rebalance_counter += 1
+                    print(f"💰 재분배 카운터: {rebalance_counter}/{rebalance_interval_cycles}")
                     if rebalance_counter >= rebalance_interval_cycles:
                         print("💰 지능형 투자금 재분배 실행...")
                         try:
@@ -2038,96 +2195,205 @@ class AutoOptimizationScheduler:
                             print(f"❌ 투자금 재분배 오류: {e}")
                         rebalance_counter = 0  # 카운터 리셋
                     
-                    # 1시간마다 최적 시간대 및 그리드 설정 업데이트
+                    # 자동 최적화 간격마다 최적 시간대 및 그리드 설정 업데이트
                     timeframe_update_counter += 1
                     if timeframe_update_counter >= timeframe_update_interval_cycles:
-                        print("🔄 최적 시간대/그리드 설정 업데이트 실행...")
+                        print(f"🔄 최적 시간대/그리드 설정 업데이트 실행... (간격: {interval_minutes}분)")
+                        
+                        update_success = False
+                        manager_instance = None
+                        
                         try:
-                            if 'coin_grid_manager' in globals():
-                                # 새로운 최적화 시스템 사용
-                                coin_grid_manager.update_optimal_settings_for_all_coins(force_update=True)
+                            # coin_grid_manager 안전한 접근
+                            try:
+                                if 'coin_grid_manager' in globals() and globals()['coin_grid_manager'] is not None:
+                                    manager_instance = globals()['coin_grid_manager']
+                                    print("🎯 기존 coin_grid_manager로 최적 설정 업데이트 시도...")
+                                else:
+                                    print("⚠️ coin_grid_manager를 찾을 수 없음. 새로 생성...")
+                                    manager_instance = CoinSpecificGridManager()
+                                    globals()['coin_grid_manager'] = manager_instance
+                            except Exception as access_e:
+                                print(f"❌ coin_grid_manager 접근 오류: {access_e}")
+                                print("🔄 새로운 인스턴스 생성...")
+                                manager_instance = CoinSpecificGridManager()
+                                globals()['coin_grid_manager'] = manager_instance
+                            
+                            # 최적 설정 업데이트 실행
+                            if manager_instance and hasattr(manager_instance, 'update_optimal_settings_for_all_coins'):
+                                manager_instance.update_optimal_settings_for_all_coins(force_update=True)
+                                update_success = True
                                 print("✅ 최적 시간대/그리드 설정 업데이트 완료")
-                                
-                                # 차트 데이터 강제 새로고침
-                                if 'chart_data' in globals():
-                                    print("📊 차트 데이터 새로고침...")
-                                    # GUI 큐를 통해 차트 새로고침 신호 보내기
-                                    try:
-                                        if update_callback:
-                                            update_callback("optimal_update")
-                                            # 추가로 GUI 전체 업데이트 요청
-                                            update_callback("force_gui_update")
-                                    except Exception as cb_e:
-                                        print(f"콜백 호출 오류: {cb_e}")
-                                
-                                # 그리드 데이터 강제 새로고침을 위한 추가 작업
-                                try:
-                                    # 모든 코인의 그리드 데이터 다시 생성
+                            else:
+                                print("❌ update_optimal_settings_for_all_coins 메서드를 찾을 수 없음")
+                                # 대안: 직접 최적화 실행
+                                if manager_instance:
                                     tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
                                     for ticker in tickers:
-                                        if ticker in globals().get('chart_data', {}):
-                                            # 차트 데이터에서 그리드 정보 추출
-                                            chart_info = globals()['chart_data'][ticker]
-                                            if len(chart_info) >= 6:
-                                                high_price, low_price, grid_levels, grid_count, allocated_amount, period_str = chart_info
-                                                
-                                                # 그리드 데이터 동기화
-                                                if 'grid_data' not in globals():
-                                                    globals()['grid_data'] = {}
-                                                
-                                                globals()['grid_data'][ticker] = {
-                                                    'grid_levels': grid_levels,
-                                                    'high_price': high_price,
-                                                    'low_price': low_price,
-                                                    'grid_count': grid_count,
-                                                    'allocated_amount': allocated_amount,
-                                                    'price_range_period': period_str,
-                                                    'last_updated': datetime.now().isoformat()
-                                                }
-                                                
-                                                print(f"📊 {get_korean_coin_name(ticker)} 그리드 데이터 동기화 완료: {grid_count}개 그리드, 범위 {low_price:,.0f}~{high_price:,.0f}원")
-                                    
-                                    # 그리드 데이터 저장
-                                    save_grid_data()
-                                    print("✅ 모든 코인 그리드 데이터 동기화 및 저장 완료")
-                                    
-                                except Exception as sync_e:
-                                    print(f"❌ 그리드 데이터 동기화 오류: {sync_e}")
+                                        try:
+                                            if hasattr(manager_instance, 'find_optimal_timeframe_and_grid'):
+                                                optimal_timeframe, optimal_grid_count = manager_instance.find_optimal_timeframe_and_grid(ticker, force_update=True)
+                                                coin_name = get_korean_coin_name(ticker)
+                                                print(f"📊 {coin_name}: {optimal_timeframe}시간, {optimal_grid_count}개 그리드")
+                                        except Exception as ticker_e:
+                                            print(f"❌ {ticker} 최적화 오류: {ticker_e}")
+                                    update_success = True
+                                    print("✅ 직접 최적화 방식으로 업데이트 완료")
+                            
+                            # 업데이트 성공 시 추가 작업
+                            if update_success:
+                                # 차트 데이터 강제 새로고침
+                                try:
+                                    if update_callback:
+                                        update_callback("optimal_update")
+                                        update_callback("force_gui_update")
+                                        print("📊 GUI 업데이트 신호 전송 완료")
+                                except Exception as cb_e:
+                                    print(f"콜백 호출 오류: {cb_e}")
                                 
-                            else:
-                                print("⚠️ coin_grid_manager를 찾을 수 없음")
+                                # 그리드 데이터 강제 새로고침
+                                self._force_refresh_grid_data()
+                                
+                                # 성공 로그 기록
+                                log_trade("AUTO_SYSTEM", "자동업데이트", "최적 설정 업데이트 완료", 
+                                    f"{interval_minutes}분 주기로 시간대와 그리드 설정이 자동 업데이트됨", {
+                                        "update_time": datetime.now().isoformat(),
+                                        "interval_minutes": interval_minutes,
+                                        "interval_cycles": timeframe_update_interval_cycles,
+                                        "counter": timeframe_update_counter,
+                                        "trigger": f"{interval_minutes}분 자동 업데이트"
+                                    })
+                                
                         except Exception as e:
-                            print(f"❌ 최적 설정 업데이트 오류: {e}")
+                            print(f"❌ 최적 설정 업데이트 심각 오류: {type(e).__name__} - {e}")
+                            log_trade("AUTO_SYSTEM", "오류", "자동 업데이트 실패", 
+                                f"{interval_minutes}분 업데이트 중 오류 발생: {str(e)[:200]}", {
+                                    "error_type": type(e).__name__,
+                                    "error_message": str(e)[:200],
+                                    "interval_minutes": interval_minutes,
+                                    "counter": timeframe_update_counter,
+                                    "cycles": timeframe_update_interval_cycles,
+                                    "trigger": f"{interval_minutes}분 자동 업데이트 오류"
+                                })
+                        
                         timeframe_update_counter = 0  # 카운터 리셋
+                        print(f"🔄 자동 업데이트 카운터 리셋 완료 (다음 업데이트까지 {interval_minutes}분)")
                     
                     print("✅ 조건 만족 - 자동 최적화 실행")
                     self._perform_optimization(update_callback)
                 else:
                     print("❌ 조건 불만족 - 최적화 건너뜀")
+                
+                # 주기적으로 메모리 정리 (매 시간마다) - 공격적 정리 사용
+                try:
+                    aggressive_memory_cleanup()
+                except Exception as cleanup_e:
+                    print(f"공격적 메모리 정리 오류: {cleanup_e}")
+                    # 실패시 기본 정리라도 시도
+                    try:
+                        cleanup_expired_cache()
+                    except:
+                        pass
                     
                 # 최적화 완료 후 다음 사이클을 위해 간격 다시 확인
                 interval_minutes = config.get('auto_update_interval', 15)
                 print(f"⏰ 다음 자동 최적화까지 {interval_minutes}분 대기...")
                     
             except Exception as e:
-                print(f"❗ 자동 최적화 오류: {e}")
-                time.sleep(300)  # 오류 발생시 5분 대기
+                error_type = type(e).__name__
+                print(f"❗ 자동 최적화 심각 오류: {error_type} - {e}")
+                
+                # 오류 유형에 따라 다른 대기 시간
+                if "memory" in str(e).lower() or "recursion" in str(e).lower():
+                    print("🆘 메모리/재귀 오류 감지, 10분 대기...")
+                    time.sleep(600)  # 메모리 오류 시 10분 대기
+                elif "api" in str(e).lower() or "network" in str(e).lower():
+                    print("🌐 API/네트워크 오류 감지, 3분 대기...")
+                    time.sleep(180)  # API 오류 시 3분 대기
+                else:
+                    print("⚠️ 일반 오류, 5분 대기...")
+                    time.sleep(300)  # 기타 오류 시 5분 대기
                 
         print("🔚 자동 최적화 워커 종료")
     
+    def _force_refresh_grid_data(self):
+        """그리드 데이터 강제 새로고침"""
+        try:
+            print("🔄 그리드 데이터 강제 새로고침 시작...")
+            tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+            refresh_count = 0
+            
+            for ticker in tickers:
+                try:
+                    if ticker in globals().get('chart_data', {}):
+                        # 차트 데이터에서 그리드 정보 추출
+                        chart_info = globals()['chart_data'][ticker]
+                        if len(chart_info) >= 6:
+                            high_price, low_price, grid_levels, grid_count, allocated_amount, period_str = chart_info
+                            
+                            # 그리드 데이터 동기화
+                            if 'grid_data' not in globals():
+                                globals()['grid_data'] = {}
+                            
+                            globals()['grid_data'][ticker] = {
+                                'grid_levels': grid_levels,
+                                'high_price': high_price,
+                                'low_price': low_price,
+                                'grid_count': grid_count,
+                                'allocated_amount': allocated_amount,
+                                'price_range_period': period_str,
+                                'last_updated': datetime.now().isoformat()
+                            }
+                            
+                            refresh_count += 1
+                            coin_name = get_korean_coin_name(ticker)
+                            print(f"📊 {coin_name} 그리드 데이터 새로고침: {grid_count}개 그리드, 범위 {low_price:,.0f}~{high_price:,.0f}원")
+                        
+                except Exception as ticker_e:
+                    print(f"❌ {ticker} 그리드 데이터 새로고침 오류: {ticker_e}")
+            
+            # 그리드 데이터 저장
+            if refresh_count > 0:
+                save_grid_data()
+                print(f"✅ {refresh_count}개 코인 그리드 데이터 새로고침 및 저장 완료")
+            else:
+                print("⚠️ 새로고침할 그리드 데이터가 없음")
+                
+        except Exception as e:
+            print(f"❌ 그리드 데이터 강제 새로고침 오류: {e}")
+    
     def _perform_optimization(self, update_callback):
-        """실제 최적화 수행"""
+        """실제 최적화 수행 (안정성 강화)"""
         global coin_grid_manager
         try:
             print("🚀 자동 최적화 시작...")
+            results = None
             
-            # 코인별 그리드 최적화 실행
-            if hasattr(coin_grid_manager, 'force_optimization_for_all_coins'):
-                results = coin_grid_manager.force_optimization_for_all_coins()
-            else:
-                print("❌ force_optimization_for_all_coins 메서드를 찾을 수 없습니다. 새 인스턴스를 생성합니다.")
-                coin_grid_manager = CoinSpecificGridManager()
-                results = coin_grid_manager.force_optimization_for_all_coins()
+            # coin_grid_manager 유효성 검사 및 초기화
+            try:
+                if 'coin_grid_manager' not in globals() or coin_grid_manager is None:
+                    print("🔄 coin_grid_manager 새로 생성...")
+                    coin_grid_manager = CoinSpecificGridManager()
+                
+                # auto_trading_system에서 최적화 메서드 호출
+                if hasattr(auto_trading_system, 'force_optimization_for_all_coins'):
+                    print("💫 auto_trading_system에서 최적화 실행...")
+                    results = auto_trading_system.force_optimization_for_all_coins()
+                else:
+                    print("⚠️ force_optimization_for_all_coins 메서드가 없음. 재생성...")
+                    globals()['auto_trading_system'] = AutoTradingSystem()
+                    results = globals()['auto_trading_system'].force_optimization_for_all_coins()
+                    
+            except Exception as mgr_e:
+                print(f"❌ auto_trading_system 오류: {mgr_e}")
+                print("🔄 auto_trading_system 강제 재생성...")
+                try:
+                    globals()['auto_trading_system'] = AutoTradingSystem()
+                    results = globals()['auto_trading_system'].force_optimization_for_all_coins()
+                    print("✅ 재생성된 auto_trading_system으로 최적화 완료")
+                except Exception as recreate_e:
+                    print(f"❌ auto_trading_system 재생성도 실패: {recreate_e}")
+                    raise recreate_e
             
             if results:
                 print("✅ 자동 최적화 완료")
@@ -2237,24 +2503,14 @@ class AutoOptimizationScheduler:
             self.last_optimization = datetime.now()
             
         except Exception as e:
-            print(f"최적화 수행 중 오류: {e}")
-            # 오류 발생시에도 기본적인 수익 실현 기능은 수행 (중복 방지)
-            try:
-                current_investment = float(config.get('total_investment', 100000000))
-                updated_investment, total_profit = update_investment_with_profits(current_investment, force_update=False)
-                if total_profit > 0 and updated_investment != current_investment:
-                    config['total_investment'] = str(int(updated_investment))
-                    save_config(config)
-                    reinvest_reason = "오류 발생 시 비상 수익 재투자"
-                    reinvest_details = {
-                        "previous_investment": f"{current_investment:,.0f}원",
-                        "profit": f"{total_profit:,.0f}원",
-                        "new_investment": f"{updated_investment:,.0f}원",
-                        "trigger": "시스템 오류 시 안전 조치"
-                    }
-                    log_trade("AUTO_SYSTEM", "비상수익재투자", f"수익: +{total_profit:,.0f}원", reinvest_reason, reinvest_details)
-            except:
-                pass
+            print(f"❌ 최적화 수행 중 오류: {type(e).__name__} - {e}")
+            # 오류 로깅만 하고 무한 루프를 방지하기 위해 비상 수익 재투자는 제거
+            log_trade("AUTO_SYSTEM", "오류", f"최적화 오류", f"자동 최적화 실행 중 오류 발생: {str(e)[:200]}", {
+                "error_type": type(e).__name__,
+                "error_message": str(e)[:200],
+                "timestamp": datetime.now().isoformat(),
+                "trigger": "자동 최적화 실행 중"
+            })
     
     def _load_recent_trades(self):
         """최근 거래 데이터 로드"""
@@ -2286,10 +2542,20 @@ class AutoOptimizationScheduler:
         return 0
     
     def _perform_intelligent_rebalancing(self, update_callback):
-        """지능형 투자금 재분배 수행"""
+        """지능형 투자금 재분배 수행 (중복 실행 방지)"""
         global coin_allocation_system
+        
+        # 중복 실행 방지 - 클래스 변수 사용
+        current_time = datetime.now()
+        if hasattr(self, 'last_rebalance_time'):
+            time_diff = (current_time - self.last_rebalance_time).total_seconds()
+            if time_diff < 300:  # 5분 이내 중복 실행 방지
+                print(f"🔄 재분배 스킵: {time_diff:.0f}초 전에 실행됨")
+                return
+        
         try:
             print("🎯 지능형 투자금 재분배 시작...")
+            self.last_rebalance_time = current_time
             
             # 활성 코인 목록 가져오기
             active_coins = []
@@ -3698,40 +3964,53 @@ last_investment_update_time = 0
 last_investment_update_profit = 0
 
 def update_investment_with_profits(original_investment, force_update=False):
-    """수익금을 포함하여 투자금 재계산 (중복 방지)"""
+    """수익금을 포함하여 투자금 재계산 (중복 방지 강화)"""
     global last_investment_update_time, last_investment_update_profit
     
     try:
         with investment_update_lock:
             current_time = time.time()
             
-            # 5초 이내의 중복 업데이트 방지 (force_update가 True가 아닌 경우)
-            if not force_update and (current_time - last_investment_update_time < 5):
+            # 30초 이내의 중복 업데이트 방지 (더 강화)
+            if not force_update and (current_time - last_investment_update_time < 30):
+                print(f"🔄 투자금 업데이트 스킵: {current_time - last_investment_update_time:.1f}초 전에 실행됨")
                 return original_investment + last_investment_update_profit, last_investment_update_profit
             
             total_profit = calculate_total_realized_profit()
+            
+            # 수익이 0이거나 이전과 동일한 경우 업데이트 스킵
+            if total_profit <= 0 or (not force_update and total_profit == last_investment_update_profit):
+                print(f"🔄 투자금 업데이트 불필요: 수익={total_profit:,.0f}원, 이전={last_investment_update_profit:,.0f}원")
+                last_investment_update_time = current_time
+                return original_investment + total_profit, total_profit
+            
             updated_investment = original_investment + total_profit
             
-            # 수익이 있고 이전 업데이트와 다른 경우에만 로그 기록
-            if total_profit > 0 and (force_update or total_profit != last_investment_update_profit):
+            # 수익 변화가 있고 의미 있는 변화인 경우에만 로그 기록 (100원 이상)
+            profit_diff = abs(total_profit - last_investment_update_profit)
+            if profit_diff >= 100:  # 100원 이상 변화 시에만 로그
                 update_reason = f"실현 수익 {total_profit:,.0f}원 투자금 재투자"
                 update_details = {
                     "original_investment": f"{original_investment:,.0f}원",
                     "realized_profit": f"{total_profit:,.0f}원",
                     "updated_investment": f"{updated_investment:,.0f}원",
+                    "profit_change": f"{profit_diff:,.0f}원",
                     "growth_rate": f"{((updated_investment - original_investment) / original_investment * 100):+.2f}%",
                     "force_update": "강제" if force_update else "자동",
                     "trigger": "수익 복리 투자"
                 }
                 log_trade("SYSTEM", "투자금 업데이트", f"기존: {original_investment:,.0f}원 + 수익: {total_profit:,.0f}원 = 신규: {updated_investment:,.0f}원", update_reason, update_details)
-                speak_async(f"수익금 {total_profit:,.0f}원이 투자금에 포함되었습니다")
+                
+                # TTS는 1,000원 이상 변화 시에만
+                if profit_diff >= 1000:
+                    speak_async(f"수익금 {total_profit:,.0f}원이 투자금에 포함되었습니다")
                 
             last_investment_update_time = current_time
             last_investment_update_profit = total_profit
             
             return updated_investment, total_profit
     except Exception as e:
-        print(f"투자금 업데이트 오류: {e}")
+        print(f"❌ 투자금 업데이트 오류: {type(e).__name__} - {e}")
         return original_investment, 0
 
 
@@ -4280,6 +4559,7 @@ def evaluate_status(profit_percent, is_trading=False, panic_mode=False):
 # 가격 범위 캐시 시스템
 price_range_cache = {}
 cache_timeout = {}  # 캐시 만료 시간 저장
+MAX_CACHE_SIZE = 100  # 최대 캐시 엔트리 수
 
 def get_cache_timeout_minutes(hours):
     """시간 기준에 따른 캐시 유지 시간 결정"""
@@ -4292,10 +4572,45 @@ def get_cache_timeout_minutes(hours):
     else:
         return 60   # 그 이상: 60분 캐시
 
+def cleanup_expired_cache():
+    """만료된 캐시 정리 및 크기 제한"""
+    global price_range_cache, cache_timeout
+    current_time = datetime.now()
+    
+    # 만료된 캐시 제거
+    expired_keys = []
+    for key in list(cache_timeout.keys()):
+        if current_time > cache_timeout[key]:
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        if key in price_range_cache:
+            del price_range_cache[key]
+        if key in cache_timeout:
+            del cache_timeout[key]
+    
+    # 캐시 크기 제한
+    if len(price_range_cache) > MAX_CACHE_SIZE:
+        # 가장 오래된 것부터 삭제
+        sorted_keys = sorted(cache_timeout.keys(), key=lambda k: cache_timeout[k])
+        keys_to_remove = sorted_keys[:-MAX_CACHE_SIZE]
+        for key in keys_to_remove:
+            if key in price_range_cache:
+                del price_range_cache[key]
+            if key in cache_timeout:
+                del cache_timeout[key]
+    
+    if expired_keys:
+        print(f"🧹 캐시 정리: {len(expired_keys)}개 만료된 엔트리 제거, 현재 캐시 크기: {len(price_range_cache)}")
+
 def calculate_price_range_hours(ticker, hours):
     """시간 기준 가격 범위 계산 (캐시 시스템 포함)"""
     cache_key = f"{ticker}_{hours}h"
     current_time = datetime.now()
+    
+    # 주기적으로 캐시 정리 (10% 확률)
+    if len(price_range_cache) > 20 and hash(cache_key) % 10 == 0:
+        cleanup_expired_cache()
     
     # 캐시 확인
     if cache_key in price_range_cache and cache_key in cache_timeout:
@@ -4896,6 +5211,7 @@ def has_trade_logs(ticker):
 # 개선된 그리드 트레이딩 로직
 def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent_str, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data, should_resume=False):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
+    global config  # 전역 config 변수 접근을 위한 선언
     start_time = datetime.now()
 
     # 목표 수익률 처리
@@ -6624,13 +6940,25 @@ def start_dashboard():
 
     def on_closing():
         if messagebox.askokcancel("종료", "정말로 종료하시겠습니까?"):
+            print("🔄 프로그램 안전 종료 시작...")
+            
+            # 기존 거래 중단
             if active_trades:
                 for ticker, stop_event in active_trades.items():
                     stop_event.set()
                 active_trades.clear()  # active_trades 딕셔너리 클리어
-            stop_tts_worker()
-            # 중앙집중식 데이터 수집 워커 중지
-            data_manager.stop_data_worker()
+            
+            # 자동 최적화 스케줄러 중지 
+            try:
+                if 'auto_scheduler' in globals():
+                    auto_scheduler.stop_auto_optimization()
+            except Exception as e:
+                print(f"자동 최적화 스케줄러 종료 오류: {e}")
+            
+            # 모든 스레드 안전 종료
+            safe_shutdown_all_threads()
+            
+            print("✅ 프로그램 안전 종료 완료")
             root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
@@ -6638,7 +6966,12 @@ def start_dashboard():
     def update_config(new_config):
         """설정 업데이트 콜백"""
         global config, upbit
-        config = new_config
+        # 안전한 타입 검증
+        if isinstance(new_config, dict):
+            config = new_config
+        else:
+            print(f"❌ 잘못된 config 타입: {type(new_config)}, 무시됨")
+            return
         initialize_upbit()
         # 자동거래 상태 업데이트
         if 'update_auto_status' in globals():
@@ -7318,16 +7651,16 @@ def start_dashboard():
     # 최적화 강제 실행 함수
     def force_optimization():
         """최적화를 강제로 실행"""
-        global coin_grid_manager
+        global auto_trading_system
         try:
-            # 인스턴스에 메서드가 있는지 확인
-            if hasattr(coin_grid_manager, 'force_optimization_for_all_coins'):
-                results = coin_grid_manager.force_optimization_for_all_coins()
+            # auto_trading_system에서 메서드 호출
+            if hasattr(auto_trading_system, 'force_optimization_for_all_coins'):
+                results = auto_trading_system.force_optimization_for_all_coins()
             else:
                 print("❌ force_optimization_for_all_coins 메서드를 찾을 수 없습니다.")
                 # 새로운 인스턴스 생성 시도
-                coin_grid_manager = CoinSpecificGridManager()
-                results = coin_grid_manager.force_optimization_for_all_coins()
+                auto_trading_system = AutoTradingSystem()
+                results = auto_trading_system.force_optimization_for_all_coins()
             
             # 차트 업데이트 트리거
             for ticker in results.keys():
