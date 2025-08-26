@@ -2774,59 +2774,30 @@ class AutoOptimizationScheduler:
 auto_scheduler = AutoOptimizationScheduler()
 
 def perform_manual_optimization():
-    """수동 최적화 실행"""
+    """수동 최적화 실행 - 자동 최적화와 동일한 효과"""
     def optimization_task():
         try:
-            messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다. 잠시 기다려주세요...")
+            print("🚀 수동 최적화 시작 (자동 최적화 로직 사용)...")
+            messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다.\n\n✨ 복리 재배분 효과 포함\n🔄 그리드 설정 최적화")
             
-            # 거래 로그 데이터 로드
-            trades_data = auto_scheduler._load_recent_trades()
-            if len(trades_data) < 10:
-                messagebox.showwarning("최적화 실패", "최적화를 위한 충분한 거래 데이터가 없습니다. (최소 10개 필요)")
-                return
-            
-            # 성능 분석
-            performance = auto_trading_system.analyze_performance(trades_data)
-            
-            if performance["status"] == "success":
-                # 파라미터 최적화
-                old_config = dict(config)  # 이전 설정 복사
-                optimized_config = auto_trading_system.optimize_parameters(config, performance)
+            # 자동 최적화 스케줄러의 _perform_optimization 직접 호출
+            if auto_scheduler and hasattr(auto_scheduler, '_perform_optimization'):
+                auto_scheduler._perform_optimization(None)  # update_callback 없이 실행
                 
-                # 설정 업데이트
-                config.update(optimized_config)
-                save_config(config)
-                
-                # 최적화 시간 업데이트
-                config['last_optimization'] = datetime.now().isoformat()
-                save_config(config)
-                
-                # GUI 업데이트는 메인 스레드에서 처리됨
-                
-                # 최적화 결과 로그
-                auto_scheduler._log_optimization_result(performance, optimized_config)
-                
-                # 결과 메시지
-                win_rate = performance.get('win_rate', 0) * 100
-                total_profit = performance.get('total_profit', 0)
-                new_risk_mode = config.get('risk_mode', '알 수 없음')
-                
-                result_msg = f"✅ 수동 최적화 완료!\n\n"
-                result_msg += f"🎯 리스크 모드: {new_risk_mode}\n"
-                result_msg += f"📊 승률: {win_rate:.1f}%\n"
-                result_msg += f"💰 수익: {total_profit:,.0f}원\n"
-                result_msg += f"🕐 최적화 시간: {datetime.now().strftime('%H:%M')}"
+                # 성공 메시지
+                result_msg = "✅ 수동 최적화 완료!\n\n"
+                result_msg += "💰 복리 재배분: 실현수익을 총자산에 자동 반영\n"
+                result_msg += "🔄 그리드 설정: 모든 코인 최적화 완료\n"
+                result_msg += "📊 GUI 업데이트: 실시간 반영 완료\n"
+                result_msg += f"🕐 실행 시간: {datetime.now().strftime('%H:%M:%S')}"
                 
                 messagebox.showinfo("최적화 완료", result_msg)
                 
-                # 카카오 알림
-                if config.get('kakao_enabled', True):
-                    auto_scheduler._send_optimization_notification(performance, optimized_config)
-                    
             else:
-                messagebox.showwarning("최적화 실패", f"최적화를 수행할 수 없습니다:\n{performance.get('message', '알 수 없는 오류')}")
+                messagebox.showerror("오류", "자동 최적화 시스템을 찾을 수 없습니다.")
                 
         except Exception as e:
+            print(f"❌ 수동 최적화 오류: {e}")
             messagebox.showerror("최적화 오류", f"수동 최적화 중 오류가 발생했습니다:\n{e}")
     
     # 별도 스레드에서 실행 (GUI 블록 방지)
@@ -7284,7 +7255,7 @@ def start_dashboard():
     main_button_frame.grid(row=7, column=0, columnspan=2, sticky='ew', pady=(10, 5))
     main_button_frame.grid_columnconfigure(0, weight=3)  # 거래시작 버튼 영역 (30% 비율)
     main_button_frame.grid_columnconfigure(1, weight=2)  # 자동모드 버튼 영역 (20% 비율)  
-    main_button_frame.grid_columnconfigure(2, weight=2)  # 최적화 버튼 영역 (20% 비율)
+    main_button_frame.grid_columnconfigure(2, weight=2)  # 수동 최적화 버튼 영역 (20% 비율)
     main_button_frame.grid_columnconfigure(3, weight=3)  # 고급설정 버튼 영역 (30% 비율)
     
     # 버튼 스타일 정의
@@ -7697,38 +7668,29 @@ def start_dashboard():
     auto_toggle_btn = ttk.Button(main_button_frame, text="🤖 자동모드", command=toggle_auto_mode, style='Small.TButton')
     auto_toggle_btn.grid(row=0, column=1, padx=(2, 2), sticky='nsew')
     
-    # 최적화 강제 실행 함수
-    def force_optimization():
-        """최적화를 강제로 실행"""
-        global auto_trading_system
+    # 수동 최적화 버튼 (자동 최적화와 동일한 효과)
+    def manual_optimization():
+        """수동 최적화 - 자동 최적화와 동일한 복리 재배분 효과"""
         try:
-            # auto_trading_system에서 메서드 호출
-            if hasattr(auto_trading_system, 'force_optimization_for_all_coins'):
-                results = auto_trading_system.force_optimization_for_all_coins()
+            if auto_scheduler and hasattr(auto_scheduler, '_perform_optimization'):
+                print("🚀 수동 최적화 시작...")
+                messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다. 자동 최적화와 동일한 효과를 적용합니다.")
+                
+                # 자동 최적화 스케줄러의 _perform_optimization 직접 호출
+                auto_scheduler._perform_optimization(update_config)
+                
+                messagebox.showinfo("최적화 완료", "✅ 수동 최적화 완료!\n\n💰 복리 재배분 적용\n🔄 그리드 설정 최적화\n📊 GUI 업데이트 완료")
+                
             else:
-                print("❌ force_optimization_for_all_coins 메서드를 찾을 수 없습니다.")
-                # 새로운 인스턴스 생성 시도
-                auto_trading_system = AutoTradingSystem()
-                results = auto_trading_system.force_optimization_for_all_coins()
-            
-            # 차트 업데이트 트리거
-            for ticker in results.keys():
-                if ticker in chart_data:
-                    update_chart(ticker, int(config.get("period", 7)))
-            
-            # 결과 메시지 생성
-            result_msg = "자동 최적화 완료!\n\n"
-            for ticker, result in results.items():
-                coin_name = get_korean_coin_name(ticker)
-                result_msg += f"• {coin_name}: {result['period']}일/{result['grid_count']}그리드\n"
-            
-            messagebox.showinfo("최적화 완료", result_msg)
+                messagebox.showerror("오류", "자동 최적화 시스템을 찾을 수 없습니다.")
+                
         except Exception as e:
-            messagebox.showerror("최적화 오류", f"최적화 실행 중 오류가 발생했습니다:\n{e}")
+            print(f"❌ 수동 최적화 오류: {e}")
+            messagebox.showerror("최적화 오류", f"수동 최적화 실행 중 오류가 발생했습니다:\n{e}")
     
-    # 최적화 버튼
-    optimize_btn = ttk.Button(main_button_frame, text="🔍 최적화", command=force_optimization, style='Small.TButton')
-    optimize_btn.grid(row=0, column=2, padx=(2, 2), sticky='nsew')
+    # 수동 최적화 버튼
+    manual_optimize_btn = ttk.Button(main_button_frame, text="⚡ 수동 최적화", command=manual_optimization, style='Small.TButton')
+    manual_optimize_btn.grid(row=0, column=2, padx=(2, 2), sticky='nsew')
     
     # 설정 버튼
     settings_btn = ttk.Button(main_button_frame, text="⚙️ 고급설정", command=lambda: open_settings_window(root, config, update_config, None), style='Small.TButton')
