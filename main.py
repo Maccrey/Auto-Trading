@@ -2391,10 +2391,13 @@ class AutoOptimizationScheduler:
     
     def _perform_optimization(self, update_callback):
         """실제 최적화 수행 (안정성 강화)"""
-        global coin_grid_manager
+        global coin_grid_manager, config
         try:
             print("🚀 자동 최적화 시작...")
             results = None
+            
+            # 복리 재배분: 실현수익을 포함한 총자산 재계산
+            self._apply_compound_rebalancing()
             
             # coin_grid_manager 유효성 검사 및 초기화
             try:
@@ -2715,7 +2718,7 @@ class AutoOptimizationScheduler:
                     # allocation_label 직접 업데이트
                     if 'allocation_label' in globals():
                         total_reallocated = sum(new_allocations.values())
-                        globals()['allocation_label'].config(text=f"재분배된 총자산: {total_reallocated:,.0f}원", style="Green.TLabel")
+                        globals()['allocation_label'].config(text=f"재분배된 총자산: {total_reallocated:,.0f}원 (실현수익 포함)", style="Green.TLabel")
                         print(f"📊 총자산 라벨 업데이트: {total_reallocated:,.0f}원")
                     
                 except Exception as gui_error:
@@ -5693,6 +5696,17 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 current_total_investment, active_coins, include_profits=True
             )
             
+            # GUI에 총자산 업데이트 (거래 중 실시간)
+            try:
+                if 'allocation_label' in globals():
+                    globals()['allocation_label'].config(
+                        text=f"배분된 총자산: {current_total_investment:,.0f}원 (실현수익 포함)", 
+                        style="Green.TLabel"
+                    )
+                    print(f"🔄 거래 중 총자산 GUI 업데이트: {current_total_investment:,.0f}원")
+            except Exception as gui_e:
+                print(f"⚠️ 거래 중 GUI 업데이트 오류: {gui_e}")
+            
             # 현재 코인의 새로운 분배 금액
             new_allocated_investment = new_allocations.get(ticker, current_total_investment / len(active_coins) if active_coins else current_total_investment)
             
@@ -7108,7 +7122,15 @@ def start_dashboard():
     total_profit_rate_label.grid(row=len(tickers)*6 + 1, column=2, columnspan=2, sticky='w', padx=3, pady=5)
     
     # 지능형 분배 총자산 표시
-    allocation_label = ttk.Label(ticker_frame, text="배분된 총자산: 0원", font=('Helvetica', 10, 'bold'), style="Blue.TLabel")
+    allocation_label = ttk.Label(ticker_frame, text="배분된 총자산: 0원", font=('Helvetica', 10, 'bold'), style="Green.TLabel")
+    
+    # 초기 총자산 표시 (실현수익 포함)
+    try:
+        initial_total = calculate_total_investment_with_profits()
+        allocation_label.config(text=f"배분된 총자산: {initial_total:,.0f}원 (실현수익 포함)")
+        print(f"💰 초기 총자산 표시: {initial_total:,.0f}원")
+    except Exception as e:
+        print(f"⚠️ 초기 총자산 표시 오류: {e}")
     allocation_label.grid(row=len(tickers)*6 + 2, column=0, columnspan=4, sticky='w', padx=3, pady=5)
 
     # 그리드 투자 설정
@@ -7520,7 +7542,7 @@ def start_dashboard():
                 
                 # GUI에 분배 정보 즉시 표시
                 total_allocated = sum(allocations.values())
-                allocation_label.config(text=f"배분된 총자산: {total_allocated:,.0f}원", style="Blue.TLabel")
+                allocation_label.config(text=f"배분된 총자산: {total_allocated:,.0f}원 (실현수익 포함)", style="Green.TLabel")
                 
                 # 각 코인별 분배 정보 표시 및 로그 기록
                 print(f"📊 지능형 분배 결과 (총 가용자금: {total_with_profits:,.0f}원)")
@@ -8813,7 +8835,7 @@ def start_dashboard():
                     try:
                         # 총 분배 금액 표시 업데이트
                         if 'allocation_label' in globals() and allocation_label:
-                            allocation_label.config(text=f"재분배된 총자산: {total_allocated:,.0f}원", style="Green.TLabel")
+                            allocation_label.config(text=f"재분배된 총자산: {total_allocated:,.0f}원 (실현수익 포함)", style="Green.TLabel")
                         
                         # 개별 코인 분배 정보 표시
                         for coin_ticker, amount in allocation_data.items():
