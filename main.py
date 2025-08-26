@@ -497,12 +497,26 @@ def analyze_market_condition(ticker, current_price, recent_prices, high_price, l
         return "오류", "분석 실패"
 
 def speak_async(text, repeat=1):
-    """TTS 큐에 메시지를 추가 (논블로킹)"""
+    """TTS 큐에 메시지를 추가 (논블로킹) - 매수/매도만 알림"""
     if tts_engine and config.get('tts_enabled', True):
-        # TTS 큐 크기 제한
-        cleanup_tts_queue()
-        for _ in range(repeat):
-            tts_queue.put(text)
+        # 매수/매도 관련 메시지만 TTS로 알림
+        if should_announce_tts(text):
+            # TTS 큐 크기 제한
+            cleanup_tts_queue()
+            for _ in range(repeat):
+                tts_queue.put(text)
+
+def should_announce_tts(text):
+    """TTS 알림 대상인지 확인 (매수/매도만)"""
+    buy_keywords = ['매수', '최종 매수']
+    sell_keywords = ['매도', '최종 매도', '수익 실현', '손절', '트레일링']
+    
+    # 보류 관련 메시지는 제외
+    if '보류' in text or '목표' in text:
+        return False
+    
+    # 매수/매도 관련 키워드 확인
+    return any(keyword in text for keyword in buy_keywords + sell_keywords)
 
 def start_tts_worker():
     """TTS 작업자 스레드 시작"""
@@ -2506,7 +2520,7 @@ class AutoOptimizationScheduler:
                                 "trigger": "시간 기반 수익 실현 체크"
                             }
                             log_trade("AUTO_SYSTEM", "자동매도", f"{korean_name}: {sold_qty:.6f}개 매도, 수익: {profit:,.0f}원", auto_sell_reason, auto_sell_details)
-                            speak_async(f"{korean_name} 자동 수익 실현")
+                            speak_async(f"{korean_name} 자동 매도 완료, 수익 {profit:,.0f}원")
                     except Exception as e:
                         print(f"자동 매도 처리 오류 ({ticker}): {e}")
             else:
@@ -3938,7 +3952,7 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
                 log_trade(ticker, sell_reason, f"{current_price:,.0f}원 ({quantity:.6f}개) 수익: {profit:,.0f}원", position_sell_reason, position_sell_details)
                 
                 korean_name = get_korean_coin_name(ticker)
-                speak_async(f"{korean_name} {sell_reason} 매도 완료")
+                speak_async(f"{korean_name} {sell_reason} 매도 완료, 수익 {profit:,.0f}원")
             else:
                 # 유지 (최고가 업데이트된 포지션 저장)
                 remaining_positions.append(position)
@@ -5800,7 +5814,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         
                         log_msg = f"손절 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 손실: {net_loss:,.0f}원 ({cut_reason})"
                         log_and_update("데모 손절", log_msg)
-                        speak_async(f"손절! {get_korean_coin_name(ticker)} {price:,.0f}원에 매도")
+                        speak_async(f"손절 매도! {get_korean_coin_name(ticker)} {price:,.0f}원, 손실 {net_loss:,.0f}원")
                         send_kakao_message(f"[손절 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 손실: {net_loss:,.0f}원")
                 
                 # 손절된 포지션 제거
@@ -6024,7 +6038,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     "panic_mode": "활성" if panic_mode else "비활성"
                                 }
                                 log_trade(ticker, "데모 매수", log_msg, buy_reason, buy_details)
-                                speak_async(f"데모 모드, {get_korean_coin_name(ticker)} {buy_price:,.0f}원에 최종 매수되었습니다.")
+                                speak_async(f"데모 최종 매수, {get_korean_coin_name(ticker)} {buy_price:,.0f}원")
                                 send_kakao_message(f"[데모 최종매수] {get_korean_coin_name(ticker)} {buy_price:,.0f}원 ({quantity:.6f}개){signal_info}")
                                 
                         else:
@@ -6120,7 +6134,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         stop_reason = f"트레일링스탑 기준 도달 (최고가 대비 {config.get('trailing_stop_percent', 3.0)}% 하락)"
                     
                     log_trade(ticker, "데모 매도", log_msg, stop_reason, sell_details)
-                    speak_async(f"데모 모드, {sell_reason}, {get_korean_coin_name(ticker)}" + f" {price:,.0f}원에 매도되었습니다.")
+                    speak_async(f"데모 {sell_reason} 매도, {get_korean_coin_name(ticker)} {price:,.0f}원, 수익 {net_profit:,.0f}원")
                     send_kakao_message(f"[데모 매도] {get_korean_coin_name(ticker)} {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원 ({sell_reason})")
                     
                     # 매도 카운트 업데이트
@@ -6213,7 +6227,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                     "quantity": f"{position['quantity']:.6f}개"
                                 }
                                 log_trade(ticker, "데모 매도", log_msg, grid_sell_reason, grid_sell_details)
-                                speak_async(f"데모 모드, {get_korean_coin_name(ticker)} " + f" {sell_price:,.0f}원에 최종 매도되었습니다.")
+                                speak_async(f"데모 최종 매도, {get_korean_coin_name(ticker)} {sell_price:,.0f}원, 수익 {net_profit:,.0f}원")
                                 send_kakao_message(f"[데모 최종매도] {get_korean_coin_name(ticker)} {sell_price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}")
                                 
                                 # 매도 카운트 업데이트
@@ -6437,7 +6451,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 "order_id": buy_result.get('uuid')
                             }
                             log_trade(ticker, "실거래 매수", f"{price:,.0f}원 ({quantity:.6f}개) 투자: {amount_per_grid:,.0f}원", buy_reason, buy_details)
-                            speak_async(f"실거래 매수 완료, {get_korean_coin_name(ticker)} {price:,.0f}원")
+                            speak_async(f"실거래 매수, {get_korean_coin_name(ticker)} {price:,.0f}원")
                             
                             print(f"🔥 실거래 매수 완료: {quantity:.8f}개 @ {price:,.0f}원")
                             
@@ -6486,7 +6500,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 "order_id": sell_result.get('uuid')
                             }
                             log_trade(ticker, "실거래 매도", f"{price:,.0f}원 ({position['quantity']:.6f}개) 수익: {net_profit:,.0f}원", sell_reason, sell_details)
-                            speak_async(f"실거래 매도 완료, {get_korean_coin_name(ticker)} 수익 {net_profit:,.0f}원")
+                            speak_async(f"실거래 매도, {get_korean_coin_name(ticker)} {price:,.0f}원, 수익 {net_profit:,.0f}원")
                             
                             print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
                             

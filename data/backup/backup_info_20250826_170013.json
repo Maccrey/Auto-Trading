@@ -1,9 +1,0 @@
-{
-  "backup_time": "20250826_170013",
-  "backed_up_files": [
-    "trade_logs_20250826_170013.json",
-    "trading_state_20250826_170013.json",
-    "profits_20250826_170013.json"
-  ],
-  "note": "데이터 초기화 전 자동 백업"
-}
