@@ -1,6 +1,29 @@
-# 📈 자동 그리드 트레이딩 봇 (Auto Grid Trading Bot)
+# 📈 자동 그리드 트레이딩 봇 v4.1.2 (Auto Grid Trading Bot)
+
+[![Version](https://img.shields.io/badge/Version-4.1.2-blue.svg)](https://github.com/your-repo/auto-trading-bot)
+[![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Last Update](https://img.shields.io/badge/Last%20Update-2025--08--26-red.svg)](#)
 
 이 프로젝트는 그리드 트레이딩 전략을 기반으로 하는 고급 암호화폐 자동거래 봇입니다. 사용자 친화적인 GUI를 통해 실시간 모니터링 및 설정을 제공하며, 다양한 시장 상황에 대응할 수 있는 고급 기능을 포함하고 있습니다.
+
+## 🔄 최신 업데이트 (v4.1.2 - 2025-08-26)
+
+### 🐛 핵심 버그 수정
+- **자동 최적화 오류 완전 해결**: `AttributeError: 'CoinSpecificGridManager' object has no attribute 'force_optimization_for_all_coins'` 오류 수정
+- **config 변수 접근 문제 수정**: `AttributeError: 'str' object has no attribute 'get'` 오류 해결
+- **메서드 호출 경로 수정**: AutoTradingSystem의 최적화 메서드를 정확하게 호출하도록 변경
+
+### ⚡ 성능 및 안정성 향상
+- **유연한 자동 업데이트 간격**: 기존 고정 1시간 → 5분~60분 사이 사용자 설정 가능
+- **실시간 가격 범위 재계산**: 설정된 간격마다 시장 상황에 맞춰 그리드 자동 조정
+- **시스템 안정성 대폭 향상**: 장시간 운영 시 발생하던 크래시 문제 해결
+- **메모리 누수 방지**: 캐시 관리 최적화 및 스레드 안전성 강화
+
+### 🎯 사용자 경험 개선
+- **설정 즉시 반영**: 자동 업데이트 간격 변경 시 즉시 적용
+- **더 정확한 로깅**: 업데이트 주기와 상태 정보를 더 명확하게 표시
+- **안정적인 장기 운영**: 24시간 무중단 운영 가능
 
 ## ✨ 주요 기능
 
