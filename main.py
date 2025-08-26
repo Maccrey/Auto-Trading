@@ -957,8 +957,18 @@ class CoinSpecificGridManager:
                 price_gap = (high_price - low_price) / optimal_grid_count
                 grid_levels = [low_price + (price_gap * i) for i in range(optimal_grid_count + 1)]
                 
-                # 투자금 분배 (임시)
-                allocated_amount = 10000000 // 3  # 3개 코인으로 나눔
+                # 투자금 분배 (지능형 분배 시스템 사용)
+                try:
+                    allocated_amount = 10000000 // 3  # 3개 코인으로 나눔 (기본값)
+                    if 'coin_allocation_system' in globals():
+                        total_investment = calculate_total_investment_with_profits()
+                        allocations = coin_allocation_system.calculate_intelligent_allocation(
+                            total_investment, [ticker], include_profits=True
+                        )
+                        allocated_amount = allocations.get(ticker, allocated_amount)
+                except Exception as e:
+                    print(f"분배 계산 오류: {e}, 기본값 사용")
+                    allocated_amount = 10000000 // 3
                 
                 # 글로벌 chart_data 업데이트
                 if 'chart_data' in globals():
@@ -967,8 +977,38 @@ class CoinSpecificGridManager:
                         optimal_grid_count, allocated_amount, f"{optimal_timeframe}시간"
                     )
                 
+                # 실제 거래에 사용되는 그리드 데이터도 업데이트
+                if 'grid_data' in globals():
+                    if ticker not in globals()['grid_data']:
+                        globals()['grid_data'][ticker] = {}
+                    
+                    # 새로운 그리드 데이터로 업데이트
+                    globals()['grid_data'][ticker] = {
+                        'grid_levels': grid_levels,
+                        'high_price': high_price,
+                        'low_price': low_price,
+                        'grid_count': optimal_grid_count,
+                        'allocated_amount': allocated_amount,
+                        'price_range_hours': optimal_timeframe,
+                        'last_updated': datetime.now().isoformat()
+                    }
+                    
+                    # 그리드 데이터 저장
+                    save_grid_data()
+                
                 coin_name = get_korean_coin_name(ticker)
-                print(f"📊 {coin_name} 차트 데이터 업데이트: {optimal_grid_count}개 그리드, {optimal_timeframe}시간")
+                print(f"📊 {coin_name} 차트 데이터 및 그리드 데이터 업데이트: {optimal_grid_count}개 그리드, {optimal_timeframe}시간, 가격범위 {low_price:,.0f}~{high_price:,.0f}원")
+                
+                # 거래 로그 기록
+                log_trade(ticker, '그리드갱신', f'{optimal_grid_count}개 그리드', 
+                    f'1시간 자동 최적화로 그리드 설정 갱신: {optimal_timeframe}시간 기준', {
+                        "grid_count": optimal_grid_count,
+                        "timeframe_hours": optimal_timeframe,
+                        "high_price": f"{high_price:,.0f}원",
+                        "low_price": f"{low_price:,.0f}원",
+                        "allocated_amount": f"{allocated_amount:,.0f}원",
+                        "trigger": "1시간 자동 최적화"
+                    })
                 
         except Exception as e:
             print(f"차트 데이터 업데이트 오류 ({ticker}): {e}")
@@ -2015,8 +2055,44 @@ class AutoOptimizationScheduler:
                                     try:
                                         if update_callback:
                                             update_callback("optimal_update")
+                                            # 추가로 GUI 전체 업데이트 요청
+                                            update_callback("force_gui_update")
                                     except Exception as cb_e:
                                         print(f"콜백 호출 오류: {cb_e}")
+                                
+                                # 그리드 데이터 강제 새로고침을 위한 추가 작업
+                                try:
+                                    # 모든 코인의 그리드 데이터 다시 생성
+                                    tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+                                    for ticker in tickers:
+                                        if ticker in globals().get('chart_data', {}):
+                                            # 차트 데이터에서 그리드 정보 추출
+                                            chart_info = globals()['chart_data'][ticker]
+                                            if len(chart_info) >= 6:
+                                                high_price, low_price, grid_levels, grid_count, allocated_amount, period_str = chart_info
+                                                
+                                                # 그리드 데이터 동기화
+                                                if 'grid_data' not in globals():
+                                                    globals()['grid_data'] = {}
+                                                
+                                                globals()['grid_data'][ticker] = {
+                                                    'grid_levels': grid_levels,
+                                                    'high_price': high_price,
+                                                    'low_price': low_price,
+                                                    'grid_count': grid_count,
+                                                    'allocated_amount': allocated_amount,
+                                                    'price_range_period': period_str,
+                                                    'last_updated': datetime.now().isoformat()
+                                                }
+                                                
+                                                print(f"📊 {get_korean_coin_name(ticker)} 그리드 데이터 동기화 완료: {grid_count}개 그리드, 범위 {low_price:,.0f}~{high_price:,.0f}원")
+                                    
+                                    # 그리드 데이터 저장
+                                    save_grid_data()
+                                    print("✅ 모든 코인 그리드 데이터 동기화 및 저장 완료")
+                                    
+                                except Exception as sync_e:
+                                    print(f"❌ 그리드 데이터 동기화 오류: {sync_e}")
                                 
                             else:
                                 print("⚠️ coin_grid_manager를 찾을 수 없음")
@@ -2874,6 +2950,33 @@ def save_config(config):
     except Exception as e:
         print(f"설정 저장 오류: {e}")
         return False
+
+def save_grid_data():
+    """그리드 데이터 저장"""
+    try:
+        if 'grid_data' in globals() and globals()['grid_data']:
+            if not os.path.exists("data"):
+                os.makedirs("data")
+            
+            grid_data_file = os.path.join("data", "grid_data.json")
+            with open(grid_data_file, 'w', encoding='utf-8') as f:
+                json.dump(globals()['grid_data'], f, indent=4, ensure_ascii=False)
+            return True
+    except Exception as e:
+        print(f"그리드 데이터 저장 오류: {e}")
+        return False
+
+def load_grid_data():
+    """그리드 데이터 로드"""
+    try:
+        grid_data_file = os.path.join("data", "grid_data.json")
+        if os.path.exists(grid_data_file):
+            with open(grid_data_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        print(f"그리드 데이터 로드 오류: {e}")
+        return {}
 
 # 전역 설정
 
@@ -8182,6 +8285,38 @@ def start_dashboard():
                 print("✅ 차트 새로고침 예약 완료")
             except Exception as e:
                 print(f"❌ 최적화 업데이트 처리 오류: {e}")
+        elif signal_type == "force_gui_update":
+            print("🔄 GUI 강제 업데이트 신호 수신")
+            try:
+                # 차트 데이터 새로고침
+                root.after(100, refresh_charts)
+                # 모든 코인의 상태 정보 새로고침
+                root.after(200, lambda: update_all_coin_info())
+                print("✅ GUI 강제 업데이트 예약 완료")
+            except Exception as e:
+                print(f"❌ GUI 강제 업데이트 처리 오류: {e}")
+    
+    def update_all_coin_info():
+        """모든 코인의 정보를 새로고침"""
+        try:
+            tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+            for ticker in tickers:
+                if ticker in globals().get('chart_data', {}):
+                    chart_info = globals()['chart_data'][ticker]
+                    if len(chart_info) >= 6:
+                        high_price, low_price, grid_levels, grid_count, allocated_amount, period_str = chart_info
+                        coin_name = get_korean_coin_name(ticker)
+                        
+                        # 상태 라벨 업데이트 (그리드 정보)
+                        status_text = f"📊 {grid_count}개 그리드 | 범위: {low_price:,.0f}~{high_price:,.0f}원 | {period_str}"
+                        if ticker in status_labels:
+                            status_labels[ticker].config(text=status_text, style="Blue.TLabel")
+                        
+                        print(f"🔄 {coin_name} 상태 정보 업데이트: {status_text}")
+                        
+            print("✅ 모든 코인 정보 업데이트 완료")
+        except Exception as e:
+            print(f"❌ 코인 정보 업데이트 오류: {e}")
     
     def process_gui_queue():
         """GUI 큐 처리"""
