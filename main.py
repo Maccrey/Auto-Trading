@@ -2403,6 +2403,29 @@ class AutoOptimizationScheduler:
         except Exception as e:
             print(f"❌ 그리드 데이터 강제 새로고침 오류: {e}")
     
+    def _apply_compound_rebalancing(self):
+        """복리 재배분: 실현수익을 포함한 총자산 재계산"""
+        try:
+            global config
+            print("💰 복리 재배분 시작...")
+            
+            # 현재 투자금 조회
+            original_investment = int(config.get("total_investment", "0"))
+            
+            # 실현수익을 포함한 업데이트된 투자금 계산
+            updated_investment, total_profit = update_investment_with_profits(original_investment, force_update=True)
+            
+            if total_profit > 0:
+                print(f"✅ 복리 재배분 완료: 기존 {original_investment:,}원 + 수익 {total_profit:,}원 = 총 {updated_investment:,}원")
+                # config에 업데이트된 투자금 반영
+                config["total_investment"] = str(updated_investment)
+                save_config(config)
+            else:
+                print("💡 복리 재배분: 실현수익이 없어 투자금 유지")
+                
+        except Exception as e:
+            print(f"❌ 복리 재배분 오류: {e}")
+    
     def _perform_optimization(self, update_callback):
         """실제 최적화 수행 (안정성 강화)"""
         global coin_grid_manager, config

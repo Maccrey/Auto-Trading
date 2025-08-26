@@ -2,4 +2,4 @@ trade_logs.json
 config.json
 profits.json
 trading_state.json
-
+*.json
