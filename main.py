@@ -666,6 +666,13 @@ default_config = {
     "auto_update_interval": 15,  # 자동 최적화 간격 (분) - 15분
     "performance_tracking": True,  # 실적 추적 활성화
     "auto_optimization": True,  # 자동 최적화 활성화
+    
+    # 동적 그리드 재설정 설정
+    "enable_dynamic_grid_reset": True,  # 동적 그리드 재설정 활성화
+    "grid_breach_threshold": 5.0,  # 그리드 이탈 감지 임계값 (%)
+    "min_breach_percent": 3.0,  # 최소 이탈 비율 (% 미만은 무시)
+    "max_grid_resets_per_hour": 12,  # 시간당 최대 재설정 횟수
+    "grid_reset_min_interval": 300,  # 재설정 간 최소 간격 (초)
     # 코인별 그리드 설정
     "coin_specific_grids": {
         "KRW-BTC": {
@@ -2420,6 +2427,18 @@ class AutoOptimizationScheduler:
                 # config에 업데이트된 투자금 반영
                 config["total_investment"] = str(updated_investment)
                 save_config(config)
+                
+                # GUI 큐를 통한 업데이트 (메인 스레드에서 안전하게 처리)
+                try:
+                    if 'gui_queue' in globals():
+                        globals()['gui_queue'].put(('allocation_update', 'SYSTEM', updated_investment))
+                        print(f"🔄 GUI 큐 - 총자산 업데이트 요청: {updated_investment:,.0f}원")
+                    else:
+                        print("⚠️ GUI 큐를 찾을 수 없음")
+                        
+                except Exception as gui_e:
+                    print(f"⚠️ 복리 재배분 GUI 업데이트 오류: {gui_e}")
+                    
             else:
                 print("💡 복리 재배분: 실현수익이 없어 투자금 유지")
                 
@@ -2810,35 +2829,6 @@ class AutoOptimizationScheduler:
 # 글로벌 자동 최적화 스케줄러 인스턴스
 auto_scheduler = AutoOptimizationScheduler()
 
-def perform_manual_optimization():
-    """수동 최적화 실행 - 자동 최적화와 동일한 효과"""
-    def optimization_task():
-        try:
-            print("🚀 수동 최적화 시작 (자동 최적화 로직 사용)...")
-            messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다.\n\n✨ 복리 재배분 효과 포함\n🔄 그리드 설정 최적화")
-            
-            # 자동 최적화 스케줄러의 _perform_optimization 직접 호출
-            if auto_scheduler and hasattr(auto_scheduler, '_perform_optimization'):
-                auto_scheduler._perform_optimization(None)  # update_callback 없이 실행
-                
-                # 성공 메시지
-                result_msg = "✅ 수동 최적화 완료!\n\n"
-                result_msg += "💰 복리 재배분: 실현수익을 총자산에 자동 반영\n"
-                result_msg += "🔄 그리드 설정: 모든 코인 최적화 완료\n"
-                result_msg += "📊 GUI 업데이트: 실시간 반영 완료\n"
-                result_msg += f"🕐 실행 시간: {datetime.now().strftime('%H:%M:%S')}"
-                
-                messagebox.showinfo("최적화 완료", result_msg)
-                
-            else:
-                messagebox.showerror("오류", "자동 최적화 시스템을 찾을 수 없습니다.")
-                
-        except Exception as e:
-            print(f"❌ 수동 최적화 오류: {e}")
-            messagebox.showerror("최적화 오류", f"수동 최적화 중 오류가 발생했습니다:\n{e}")
-    
-    # 별도 스레드에서 실행 (GUI 블록 방지)
-    threading.Thread(target=optimization_task, daemon=True).start()
 
 # 고도화된 기술적 분석 시스템
 class AdvancedTechnicalAnalyzer:
@@ -3860,11 +3850,35 @@ def load_profits_data():
         return {}
 
 def save_profits_data(profits_data):
-    """수익 데이터를 파일에 저장"""
+    """수익 데이터를 파일에 저장 + 총자산 GUI 업데이트"""
     try:
         with open(profit_file, 'w', encoding='utf-8') as f:
             json.dump(profits_data, f, indent=4, ensure_ascii=False)
         print(f"수익 데이터 저장 완료: {profits_data}")  # 디버그 로그
+        
+        # 수익 데이터가 변경될 때마다 총자산 GUI 업데이트
+        try:
+            global config
+            if 'config' in globals() and config:
+                original_investment = int(config.get("total_investment", "0"))
+                total_realized_profit = calculate_total_realized_profit()
+                updated_total = original_investment + total_realized_profit
+                
+                # GUI에 즉시 반영
+                if 'allocation_label' in globals() and globals()['allocation_label']:
+                    globals()['allocation_label'].config(
+                        text=f"배분된 총자산: {updated_total:,.0f}원 (실현수익 포함)", 
+                        style="Green.TLabel"
+                    )
+                    print(f"💰 수익 발생 후 총자산 업데이트: {updated_total:,.0f}원")
+                
+                # GUI 큐로도 업데이트
+                if 'gui_queue' in globals():
+                    globals()['gui_queue'].put(('allocation_update', 'PROFIT', updated_total))
+                    
+        except Exception as gui_update_error:
+            print(f"⚠️ 수익 저장 후 GUI 업데이트 오류: {gui_update_error}")
+            
         return True
     except Exception as e:
         print(f"수익 데이터 저장 오류: {e}")
@@ -4996,6 +5010,177 @@ class AdvancedGridState:
             return -1  # 하락 트렌드
         return 0  # 횡보
 
+def check_grid_boundary_breach(current_price, grid_levels, threshold_percent=5.0):
+    """
+    그리드 범위 이탈 감지
+    - 상단 이탈: 가격이 최고 그리드보다 threshold_percent% 이상 높음
+    - 하단 이탈: 가격이 최저 그리드보다 threshold_percent% 이상 낮음
+    """
+    if not grid_levels or len(grid_levels) < 2:
+        return False, "no_grid", 0
+    
+    highest_grid = max(grid_levels)
+    lowest_grid = min(grid_levels)
+    
+    # 상단 이탈 검사
+    upper_threshold = highest_grid * (1 + threshold_percent / 100)
+    if current_price > upper_threshold:
+        breach_percent = ((current_price - highest_grid) / highest_grid) * 100
+        return True, "upper_breach", breach_percent
+    
+    # 하단 이탈 검사  
+    lower_threshold = lowest_grid * (1 - threshold_percent / 100)
+    if current_price < lower_threshold:
+        breach_percent = ((lowest_grid - current_price) / lowest_grid) * 100
+        return True, "lower_breach", breach_percent
+    
+    return False, "within_range", 0
+
+def should_trigger_grid_reset(ticker, current_price, grid_levels, recent_prices, last_reset_time=None):
+    """
+    그리드 재설정 필요성 판단
+    """
+    try:
+        # 설정값 가져오기
+        breach_threshold = config.get('grid_breach_threshold', 5.0)
+        min_breach = config.get('min_breach_percent', 3.0)
+        min_interval = config.get('grid_reset_min_interval', 300)
+        
+        # 1. 그리드 범위 이탈 확인 (설정값 사용)
+        is_breached, breach_type, breach_percent = check_grid_boundary_breach(
+            current_price, grid_levels, breach_threshold
+        )
+        
+        if not is_breached:
+            return False, "no_breach", {}
+        
+        # 2. 최소 재설정 간격 확인 (설정값 사용)
+        if last_reset_time:
+            time_since_reset = (datetime.now() - last_reset_time).total_seconds()
+            if time_since_reset < min_interval:
+                return False, "too_soon", {"seconds_left": min_interval - time_since_reset}
+        
+        # 3. 이탈 심각성 확인 (설정값 사용)
+        if breach_percent < min_breach:
+            return False, "minor_breach", {"breach_percent": breach_percent}
+        
+        # 4. 트렌드 지속성 확인 (최근 10틱 평균)
+        if len(recent_prices) >= 10:
+            trend_strength = (recent_prices[-1] - recent_prices[-10]) / recent_prices[-10] * 100
+            if abs(trend_strength) < 1.0:  # 약한 트렌드는 일시적 이탈로 간주
+                return False, "weak_trend", {"trend_strength": trend_strength}
+        
+        # 5. 재설정 필요 조건 충족
+        reset_info = {
+            "breach_type": breach_type,
+            "breach_percent": breach_percent,
+            "current_price": current_price,
+            "trigger_reason": f"{breach_type}: {breach_percent:.1f}% 이탈"
+        }
+        
+        return True, "reset_needed", reset_info
+        
+    except Exception as e:
+        print(f"그리드 재설정 판단 오류 ({ticker}): {e}")
+        return False, "error", {"error": str(e)}
+
+def calculate_adaptive_grid_range(ticker, current_price, breach_type, recent_prices=None):
+    """
+    현재 상황에 맞는 새로운 그리드 범위 계산
+    """
+    try:
+        # 1. 현재 가격을 중심으로 한 동적 범위 계산
+        volatility_window = recent_prices[-20:] if recent_prices and len(recent_prices) >= 20 else [current_price]
+        price_std = np.std(volatility_window) if len(volatility_window) > 1 else current_price * 0.02
+        
+        # 2. 이탈 방향에 따른 비대칭 범위 설정
+        if breach_type == "upper_breach":
+            # 상향 이탈시: 현재가를 60% 지점으로 설정 (더 많은 상승 여유 확보)
+            range_size = max(price_std * 4, current_price * 0.15)  # 최소 15% 범위
+            new_low = current_price - (range_size * 0.6)
+            new_high = current_price + (range_size * 0.4) 
+        elif breach_type == "lower_breach":
+            # 하향 이탈시: 현재가를 40% 지점으로 설정 (더 많은 하락 여유 확보)  
+            range_size = max(price_std * 4, current_price * 0.15)  # 최소 15% 범위
+            new_low = current_price - (range_size * 0.4)
+            new_high = current_price + (range_size * 0.6)
+        else:
+            # 기본: 현재가 중심의 대칭 범위
+            range_size = max(price_std * 3, current_price * 0.12)
+            new_low = current_price - (range_size * 0.5)  
+            new_high = current_price + (range_size * 0.5)
+        
+        # 3. 최소 범위 보장
+        min_range = current_price * 0.08  # 최소 8% 범위
+        if (new_high - new_low) < min_range:
+            center = (new_high + new_low) / 2
+            new_low = center - (min_range / 2)
+            new_high = center + (min_range / 2)
+        
+        # 4. 음수 가격 방지
+        new_low = max(new_low, current_price * 0.5)  # 현재가의 50% 이하로 내려가지 않음
+        
+        # 디버깅 로그
+        range_percent = ((new_high - new_low) / current_price) * 100
+        print(f"🔧 {ticker} 적응형 범위 계산: {breach_type} | 현재가: {current_price:,.0f} | 새범위: {new_low:,.0f}~{new_high:,.0f} ({range_percent:.1f}%)")
+        
+        return new_high, new_low
+        
+    except Exception as e:
+        print(f"적응형 그리드 범위 계산 오류 ({ticker}): {e}")
+        # 폴백: 현재가 기준 ±10% 범위
+        fallback_range = current_price * 0.1
+        return current_price + fallback_range, current_price - fallback_range
+
+def test_grid_boundary_functions():
+    """
+    그리드 범위 이탈 감지 및 재설정 함수들의 간단한 테스트
+    """
+    print("🧪 그리드 재설정 함수 테스트 시작...")
+    
+    # 테스트 데이터
+    test_cases = [
+        {
+            "name": "정상 범위 내",
+            "price": 50000,
+            "grid_levels": [45000, 47500, 50000, 52500, 55000],
+            "expected_breach": False
+        },
+        {
+            "name": "상단 이탈",
+            "price": 60000,
+            "grid_levels": [45000, 47500, 50000, 52500, 55000],
+            "expected_breach": True,
+            "expected_type": "upper_breach"
+        },
+        {
+            "name": "하단 이탈",
+            "price": 40000,
+            "grid_levels": [45000, 47500, 50000, 52500, 55000],
+            "expected_breach": True,
+            "expected_type": "lower_breach"
+        }
+    ]
+    
+    for test in test_cases:
+        print(f"\n--- {test['name']} 테스트 ---")
+        is_breached, breach_type, breach_percent = check_grid_boundary_breach(
+            test['price'], test['grid_levels']
+        )
+        
+        print(f"가격: {test['price']:,}, 그리드: {test['grid_levels']}")
+        print(f"결과: 이탈={is_breached}, 타입={breach_type}, 퍼센트={breach_percent:.1f}%")
+        
+        if test['expected_breach'] == is_breached:
+            if not is_breached or test.get('expected_type') == breach_type:
+                print("✅ 테스트 통과")
+            else:
+                print(f"❌ 이탈 타입 불일치: 예상={test.get('expected_type')}, 실제={breach_type}")
+        else:
+            print(f"❌ 이탈 감지 결과 불일치: 예상={test['expected_breach']}, 실제={is_breached}")
+    
+    print("\n🧪 그리드 재설정 함수 테스트 완료")
+
 def check_advanced_grid_conditions(current_price, grid_price, action_type, grid_state, buffer_percent=0.1):
     """
     고급 그리드 거래 조건 확인
@@ -5671,6 +5856,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     recent_prices = []  # 가격 히스토리 저장
     api_error_count = 0  # API 오류 카운터
     max_api_errors = 10  # 최대 연속 API 오류 허용 횟수
+    
+    # 동적 그리드 재설정을 위한 상태 변수
+    last_grid_reset_time = None
+    grid_reset_count = 0
+    max_grid_resets_per_hour = 12  # 시간당 최대 재설정 횟수
 
     while not stop_event.is_set():
         # 9시 정각 그리드 자동 갱신 및 투자금 재분배
@@ -5796,6 +5986,85 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             recent_prices.append(price)
             if len(recent_prices) > 20:
                 recent_prices.pop(0)
+            
+            # 동적 그리드 범위 이탈 감지 및 재설정 (설정 활성화 확인)
+            if config.get('enable_dynamic_grid_reset', True):
+                try:
+                    should_reset, reset_reason, reset_info = should_trigger_grid_reset(
+                        ticker, price, grid_levels, recent_prices, last_grid_reset_time
+                    )
+                    
+                    if should_reset:
+                        # 시간당 재설정 횟수 제한 확인 (설정값 사용)
+                        max_resets_per_hour = config.get('max_grid_resets_per_hour', 12)
+                        min_interval = config.get('grid_reset_min_interval', 300)
+                        
+                        current_time = datetime.now()
+                        if last_grid_reset_time:
+                            time_since_last_reset = (current_time - last_grid_reset_time).total_seconds()
+                            if time_since_last_reset < 3600:  # 1시간 미만
+                                if grid_reset_count >= max_resets_per_hour:
+                                    print(f"⚠️ {ticker} 그리드 재설정 제한: 시간당 최대 {max_resets_per_hour}회")
+                                    should_reset = False
+                            else:
+                                grid_reset_count = 0  # 1시간 경과시 카운터 리셋
+                    
+                    if should_reset:
+                        breach_type = reset_info.get("breach_type", "unknown")
+                        breach_percent = reset_info.get("breach_percent", 0)
+                        
+                        # 새로운 그리드 범위 계산
+                        new_high, new_low = calculate_adaptive_grid_range(
+                            ticker, price, breach_type, recent_prices
+                        )
+                        
+                        # 기존 그리드 개수 유지 (또는 약간 조정)
+                        if breach_type in ["upper_breach", "lower_breach"]:
+                            # 강한 트렌드에서는 그리드 개수를 약간 늘려 더 세밀하게 대응
+                            new_grid_count = min(grid_count + 5, 35) if breach_percent > 8.0 else grid_count
+                        else:
+                            new_grid_count = grid_count
+                        
+                        # 새 그리드 레벨 생성
+                        new_price_gap = (new_high - new_low) / new_grid_count
+                        new_grid_levels = [new_low + (new_price_gap * i) for i in range(new_grid_count + 1)]
+                        
+                        # 현재 투자금액 기준으로 격당 투자금액 재계산
+                        current_total_value = demo_balance + sum(pos['quantity'] * price for pos in demo_positions)
+                        amount_per_grid = current_total_value / new_grid_count
+                        
+                        # 글로벌 변수 업데이트
+                        high_price, low_price = new_high, new_low
+                        grid_count = new_grid_count  
+                        grid_levels = new_grid_levels
+                        
+                        # 그리드 재설정 상태 업데이트
+                        last_grid_reset_time = current_time
+                        grid_reset_count += 1
+                        
+                        # GUI 업데이트
+                        update_gui('chart_data', high_price, low_price, grid_levels, grid_count, current_total_value)
+                        
+                        # 로그 기록
+                        reset_msg = f"그리드 자동 재설정: {breach_type} {breach_percent:.1f}% → 새범위 {new_low:,.0f}~{new_high:,.0f}원 ({new_grid_count}개)"
+                        log_and_update('그리드재설정', reset_msg)
+                        
+                        # 음성 알림 (중요한 재설정만)
+                        if breach_percent > 10.0:
+                            coin_name = get_korean_coin_name(ticker)
+                            speak_async(f"{coin_name} 그리드 범위 자동 재설정됨")
+                        
+                        # 카카오톡 알림
+                        send_kakao_message(f"[그리드 재설정] {get_korean_coin_name(ticker)}\n{reset_info.get('trigger_reason', '')}\n새 범위: {new_low:,.0f}~{new_high:,.0f}원")
+                        
+                        print(f"🔄 {ticker} {reset_msg}")
+                        
+                        # 기존 매수 대기 상태 리셋 (새 그리드에 맞춰)
+                        buy_pending = False
+                        lowest_grid_to_buy = -1
+                        
+                except Exception as grid_reset_error:
+                    print(f"⚠️ 그리드 재설정 처리 오류 ({ticker}): {grid_reset_error}")
             
             # 긴급 정지 조건 확인
             if demo_mode and demo_positions:
@@ -6984,7 +7253,7 @@ def start_dashboard():
     start_tts_worker()
 
     root = tk.Tk()
-    root.title("그리드 투자 자동매매 대시보드 v4.2.2")
+    root.title("그리드 투자 자동매매 대시보드 v4.2.4")
     root.geometry("1400x900")
 
     def on_closing():
@@ -7708,22 +7977,79 @@ def start_dashboard():
     # 수동 최적화 버튼 (자동 최적화와 동일한 효과)
     def manual_optimization():
         """수동 최적화 - 자동 최적화와 동일한 복리 재배분 효과"""
-        try:
-            if auto_scheduler and hasattr(auto_scheduler, '_perform_optimization'):
+        def optimization_task():
+            try:
                 print("🚀 수동 최적화 시작...")
-                messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다. 자동 최적화와 동일한 효과를 적용합니다.")
                 
-                # 자동 최적화 스케줄러의 _perform_optimization 직접 호출
-                auto_scheduler._perform_optimization(update_config)
+                # 수동 최적화 시작 로그 기록
+                log_trade("SYSTEM", "수동최적화시작", "사용자가 수동 최적화를 실행했습니다", 
+                         "수동 최적화 버튼 클릭", {
+                             "start_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                             "action_type": "manual_optimization",
+                             "trigger": "user_manual_action"
+                         })
                 
-                messagebox.showinfo("최적화 완료", "✅ 수동 최적화 완료!\n\n💰 복리 재배분 적용\n🔄 그리드 설정 최적화\n📊 GUI 업데이트 완료")
+                messagebox.showinfo("최적화 시작", "수동 최적화를 시작합니다.\n\n✨ 복리 재배분 효과 포함\n🔄 그리드 설정 최적화")
                 
-            else:
-                messagebox.showerror("오류", "자동 최적화 시스템을 찾을 수 없습니다.")
-                
-        except Exception as e:
-            print(f"❌ 수동 최적화 오류: {e}")
-            messagebox.showerror("최적화 오류", f"수동 최적화 실행 중 오류가 발생했습니다:\n{e}")
+                # 자동 최적화 스케줄러의 _perform_optimization 직접 호출 (콜백 없이)
+                if auto_scheduler and hasattr(auto_scheduler, '_perform_optimization'):
+                    auto_scheduler._perform_optimization(None)  # update_callback 없이 실행
+                    
+                    # 완료 로그 기록
+                    log_trade("SYSTEM", "수동최적화완료", "수동 최적화가 성공적으로 완료되었습니다", 
+                             "복리 재배분 및 그리드 최적화 완료", {
+                                 "end_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                 "result": "success",
+                                 "features": "복리재배분,그리드최적화,GUI업데이트"
+                             })
+                    
+                    # 최종 총자산 다시 확인하고 GUI 업데이트
+                    try:
+                        final_total = int(config.get("total_investment", "0"))
+                        final_profit = calculate_total_realized_profit()
+                        final_combined = final_total + final_profit
+                        
+                        # 최종 GUI 업데이트 한번 더 실행
+                        if 'gui_queue' in globals():
+                            globals()['gui_queue'].put(('allocation_update', 'FINAL', final_combined))
+                            print(f"🔄 최종 GUI 업데이트 요청: {final_combined:,.0f}원")
+                            
+                    except Exception as final_update_error:
+                        print(f"⚠️ 최종 GUI 업데이트 오류: {final_update_error}")
+                    
+                    # 성공 메시지
+                    result_msg = "✅ 수동 최적화 완료!\n\n"
+                    result_msg += "💰 복리 재배분: 실현수익을 총자산에 자동 반영\n"
+                    result_msg += "🔄 그리드 설정: 모든 코인 최적화 완료\n"
+                    result_msg += "📊 GUI 업데이트: 실시간 반영 완료\n"
+                    result_msg += f"🕐 실행 시간: {datetime.now().strftime('%H:%M:%S')}"
+                    
+                    messagebox.showinfo("최적화 완료", result_msg)
+                    
+                else:
+                    # 오류 로그 기록
+                    log_trade("SYSTEM", "수동최적화오류", "자동 최적화 시스템을 찾을 수 없습니다", 
+                             "시스템 오류", {
+                                 "error_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                 "error_type": "system_not_found",
+                                 "result": "failure"
+                             })
+                    messagebox.showerror("오류", "자동 최적화 시스템을 찾을 수 없습니다.")
+                    
+            except Exception as e:
+                print(f"❌ 수동 최적화 오류: {e}")
+                # 예외 오류 로그 기록
+                log_trade("SYSTEM", "수동최적화예외", f"수동 최적화 중 예외 발생: {str(e)}", 
+                         "예외 오류", {
+                             "error_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                             "error_type": "exception",
+                             "error_message": str(e),
+                             "result": "failure"
+                         })
+                messagebox.showerror("최적화 오류", f"수동 최적화 중 오류가 발생했습니다:\n{e}")
+        
+        # 별도 스레드에서 실행 (GUI 블록 방지)
+        threading.Thread(target=optimization_task, daemon=True).start()
     
     # 수동 최적화 버튼
     manual_optimize_btn = ttk.Button(main_button_frame, text="⚡ 수동 최적화", command=manual_optimization, style='Small.TButton')
@@ -7797,15 +8123,13 @@ def start_dashboard():
     ttk.Button(button_row1, text="🔄 로그 복구", 
                command=restore_logs_from_backup).pack(side='left', padx=(5, 2))
     ttk.Button(button_row1, text="📊 거래 로그", 
-               command=show_trading_log_popup).pack(side='left', padx=(2, 2))
-    ttk.Button(button_row1, text="⚡ 수동 최적화", 
-               command=perform_manual_optimization).pack(side='left', padx=(2, 0))
+               command=show_trading_log_popup).pack(side='left', padx=(2, 0))
 
     def clear_all_data(log_tree, detail_labels, tickers, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, all_ticker_realized_profits):
         # 안전 장치: 2단계 확인
         confirm1 = messagebox.askquestion(
             "데이터 초기화 경고", 
-            "⚠️ 주의: 모든 거래 데이터가 영구적으로 \n삭제됩니다. (거래로그, 수익데이터, 포지션)\n\n정말로 초기화하시겠습니까?",
+            "⚠️ 주의: 모든 데이터가 영구적으로 삭제됩니다!\n\n삭제될 데이터:\n• 거래로그, 수익데이터, 포지션\n• 모든 백업 파일 (backup 폴더 전체)\n• 차트 데이터 및 설정\n\n정말로 초기화하시겠습니까?",
             icon='warning'
         )
         
@@ -7815,19 +8139,31 @@ def start_dashboard():
         # 2차 확인: 더 엄격한 경고
         confirm2 = messagebox.askquestion(
             "최종 확인", 
-            "🚨 마지막 경고!\n\n이 작업은 되돌릴 수 없습니다.\n다음 데이터가 완전히 삭제됩니다:\n\n• 모든 거래 로그\n• 수익 데이터\n• 현재 포지션\n\n정말로 계속하시겠습니까?",
+            "🚨 마지막 경고!\n\n이 작업은 되돌릴 수 없습니다!\n완전히 삭제될 데이터:\n\n• 모든 거래 로그\n• 수익 데이터\n• 현재 포지션\n• 모든 백업 파일 (복구 불가)\n• 차트 히스토리\n\n✅ 설정 데이터(config.json)는 보존됩니다\n\n정말로 계속하시겠습니까?",
             icon='error'
         )
         
         if confirm2 != 'yes':
             return
         
-        # 로그 백업 생성
+        # 모든 백업 데이터 삭제 (backup 폴더 전체)
         try:
-            backup_logs_before_clear()
-            messagebox.showinfo("백업 완료", "기존 로그가 'data/backup' 폴더에 백업되었습니다.")
+            backup_folder = data_dir / "backup"
+            if backup_folder.exists():
+                import shutil
+                shutil.rmtree(backup_folder)
+                print("✅ 모든 백업 데이터 삭제 완료")
+            else:
+                print("ℹ️ 백업 폴더가 존재하지 않음")
+                
+            # 백업 폴더 구조 재생성 (향후 백업용)
+            backup_folder.mkdir(parents=True, exist_ok=True)
+            (backup_folder / "corrupted").mkdir(exist_ok=True)
+            (backup_folder / "daily").mkdir(exist_ok=True)
+            print("📁 백업 폴더 구조 재생성 완료")
+            
         except Exception as e:
-            print(f"백업 오류: {e}")
+            print(f"⚠️ 백업 폴더 처리 오류: {e}")
         
         # log_tree는 더 이상 사용하지 않음 (팝업으로 대체)
 
@@ -7908,7 +8244,9 @@ def start_dashboard():
             except Exception as e:
                 print(f"Error clearing {file_path}: {e}")
 
-        print("All data cleared.")
+        print("✅ 모든 거래 데이터 및 백업 완전 삭제 완료 (설정 보존)")
+        messagebox.showinfo("초기화 완료", 
+                           "✅ 완전 초기화 완료!\n\n삭제된 데이터:\n• 모든 거래 로그\n• 수익 데이터\n• 포지션 정보\n• 모든 백업 파일\n• 차트 히스토리\n\n✅ 설정 데이터는 보존되었습니다.")
 
     # 중간 프레임 (차트)
     mid_frame = ttk.LabelFrame(main_frame, text="실시간 차트 및 그리드")
@@ -8869,6 +9207,28 @@ def start_dashboard():
                             status_labels[ticker].config(text=updated_text)
                     except Exception as alloc_status_error:
                         print(f"개별 분배 상태 업데이트 오류: {alloc_status_error}")
+                elif key == 'allocation_update':
+                    # 총자산 업데이트 (복리 재배분 후)
+                    try:
+                        updated_total = args[0] if args else 0
+                        # allocation_label을 직접 참조 (로컬 변수)
+                        allocation_label.config(
+                            text=f"배분된 총자산: {updated_total:,.0f}원 (실현수익 포함)", 
+                            style="Green.TLabel"
+                        )
+                        print(f"📊 GUI 큐 - 총자산 업데이트 완료: {updated_total:,.0f}원")
+                    except Exception as total_update_error:
+                        print(f"총자산 업데이트 오류: {total_update_error}")
+                        try:
+                            # 백업으로 글로벌에서 찾기 시도
+                            if 'allocation_label' in globals():
+                                globals()['allocation_label'].config(
+                                    text=f"배분된 총자산: {updated_total:,.0f}원 (실현수익 포함)", 
+                                    style="Green.TLabel"
+                                )
+                                print(f"📊 글로벌 백업으로 총자산 업데이트: {updated_total:,.0f}원")
+                        except Exception as backup_error:
+                            print(f"글로벌 백업 총자산 업데이트도 실패: {backup_error}")
             except Exception as e:
                 print(f"GUI 업데이트 오류: {e}")
         root.after(100, process_gui_queue)
