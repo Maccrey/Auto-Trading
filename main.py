@@ -2543,6 +2543,17 @@ class AutoOptimizationScheduler:
                 if update_callback:
                     update_callback(config)
                 
+                # 자동 최적화 완료 후 최종 총자산 업데이트 (GUI 큐를 통한 안전한 업데이트)
+                try:
+                    final_total_investment = calculate_total_investment_with_profits()
+                    if 'gui_queue' in globals():
+                        globals()['gui_queue'].put(('allocation_update', 'AUTO_OPT', final_total_investment))
+                        print(f"🎯 자동최적화 완료 - 최종 총자산 GUI 큐 업데이트: {final_total_investment:,.0f}원")
+                    else:
+                        print("⚠️ 자동최적화 완료 - GUI 큐를 찾을 수 없음")
+                except Exception as final_gui_e:
+                    print(f"⚠️ 자동최적화 완료 후 GUI 업데이트 오류: {final_gui_e}")
+                
                 print(f"📊 최적화 결과: {len(results)}개 코인 업데이트 완료")
             else:
                 print("❌ 최적화 결과 없음")
@@ -2771,11 +2782,13 @@ class AutoOptimizationScheduler:
                         
                         print("✅ 투자금 재분배 GUI 실시간 업데이트 완료")
                     
-                    # allocation_label 직접 업데이트
-                    if 'allocation_label' in globals():
-                        total_reallocated = sum(new_allocations.values())
-                        globals()['allocation_label'].config(text=f"재분배된 총자산: {total_reallocated:,.0f}원 (실현수익 포함)", style="Green.TLabel")
-                        print(f"📊 총자산 라벨 업데이트: {total_reallocated:,.0f}원")
+                    # GUI 큐를 통한 안전한 총자산 업데이트
+                    total_reallocated = sum(new_allocations.values())
+                    if 'gui_queue' in globals():
+                        globals()['gui_queue'].put(('allocation_update', 'SYSTEM', total_reallocated))
+                        print(f"📊 GUI 큐를 통한 총자산 업데이트 요청: {total_reallocated:,.0f}원")
+                    else:
+                        print("⚠️ GUI 큐를 찾을 수 없어 총자산 업데이트 실패")
                     
                 except Exception as gui_error:
                     print(f"⚠️ 투자금 재분배 GUI 업데이트 오류: {gui_error}")
@@ -5894,16 +5907,15 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 current_total_investment, active_coins, include_profits=True
             )
             
-            # GUI에 총자산 업데이트 (거래 중 실시간)
+            # GUI 큐를 통한 안전한 총자산 업데이트 (거래 중 실시간)
             try:
-                if 'allocation_label' in globals():
-                    globals()['allocation_label'].config(
-                        text=f"배분된 총자산: {current_total_investment:,.0f}원 (실현수익 포함)", 
-                        style="Green.TLabel"
-                    )
-                    print(f"🔄 거래 중 총자산 GUI 업데이트: {current_total_investment:,.0f}원")
+                if 'gui_queue' in globals():
+                    gui_queue.put(('allocation_update', ticker, current_total_investment))
+                    print(f"🔄 거래 중 GUI 큐를 통한 총자산 업데이트 요청: {current_total_investment:,.0f}원")
+                else:
+                    print("⚠️ 거래 중 GUI 큐를 찾을 수 없어 총자산 업데이트 실패")
             except Exception as gui_e:
-                print(f"⚠️ 거래 중 GUI 업데이트 오류: {gui_e}")
+                print(f"⚠️ 거래 중 GUI 큐 업데이트 오류: {gui_e}")
             
             # 현재 코인의 새로운 분배 금액
             new_allocated_investment = new_allocations.get(ticker, current_total_investment / len(active_coins) if active_coins else current_total_investment)
@@ -9208,27 +9220,43 @@ def start_dashboard():
                     except Exception as alloc_status_error:
                         print(f"개별 분배 상태 업데이트 오류: {alloc_status_error}")
                 elif key == 'allocation_update':
-                    # 총자산 업데이트 (복리 재배분 후)
+                    # 총자산 업데이트 (자동최적화/복리재배분/거래중 업데이트)
                     try:
                         updated_total = args[0] if args else 0
-                        # allocation_label을 직접 참조 (로컬 변수)
-                        allocation_label.config(
-                            text=f"배분된 총자산: {updated_total:,.0f}원 (실현수익 포함)", 
-                            style="Green.TLabel"
-                        )
-                        print(f"📊 GUI 큐 - 총자산 업데이트 완료: {updated_total:,.0f}원")
+                        source = ticker if ticker else "SYSTEM"
+                        
+                        # 업데이트 타입별 메시지 구성
+                        if source == "SYSTEM":
+                            label_text = f"배분된 총자산: {updated_total:,.0f}원 (실현수익 포함)"
+                        elif source == "AUTO_OPT": 
+                            label_text = f"배분된 총자산: {updated_total:,.0f}원 (자동최적화 완료)"
+                        elif source == "MANUAL_OPT":
+                            label_text = f"배분된 총자산: {updated_total:,.0f}원 (수동최적화 완료)"
+                        elif source == "FINAL":
+                            label_text = f"배분된 총자산: {updated_total:,.0f}원 (최종 업데이트)"
+                        else:
+                            label_text = f"배분된 총자산: {updated_total:,.0f}원 (실시간 업데이트)"
+                            
+                        # 메인 스레드에서 GUI 업데이트 (로컬 변수 우선)
+                        allocation_label.config(text=label_text, style="Green.TLabel")
+                        print(f"📊 GUI 큐 - 총자산 업데이트 완료 [{source}]: {updated_total:,.0f}원")
+                        
+                        # 글로벌 allocation_label도 동기화
+                        if 'allocation_label' in globals() and globals()['allocation_label'] != allocation_label:
+                            globals()['allocation_label'].config(text=label_text, style="Green.TLabel")
+                            print(f"🔄 글로벌 allocation_label도 동기화 완료")
+                            
                     except Exception as total_update_error:
                         print(f"총자산 업데이트 오류: {total_update_error}")
+                        # 백업 시도
                         try:
-                            # 백업으로 글로벌에서 찾기 시도
+                            updated_total = args[0] if args else 0
+                            backup_text = f"배분된 총자산: {updated_total:,.0f}원 (백업 업데이트)"
                             if 'allocation_label' in globals():
-                                globals()['allocation_label'].config(
-                                    text=f"배분된 총자산: {updated_total:,.0f}원 (실현수익 포함)", 
-                                    style="Green.TLabel"
-                                )
-                                print(f"📊 글로벌 백업으로 총자산 업데이트: {updated_total:,.0f}원")
+                                globals()['allocation_label'].config(text=backup_text, style="Orange.TLabel")
+                                print(f"🆘 백업으로 총자산 업데이트: {updated_total:,.0f}원")
                         except Exception as backup_error:
-                            print(f"글로벌 백업 총자산 업데이트도 실패: {backup_error}")
+                            print(f"❌ 백업 총자산 업데이트도 실패: {backup_error}")
             except Exception as e:
                 print(f"GUI 업데이트 오류: {e}")
         root.after(100, process_gui_queue)
