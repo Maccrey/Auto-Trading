@@ -6050,10 +6050,12 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
     # 새로운 매수 로직을 위한 상태 변수
     buy_pending = False
+    buy_pending_start_time = None  # 매수 보류 시작 시간
     lowest_grid_to_buy = -1
     recent_prices = []  # 가격 히스토리 저장
     api_error_count = 0  # API 오류 카운터
     max_api_errors = 10  # 최대 연속 API 오류 허용 횟수
+    max_buy_pending_minutes = 30  # 매수 보류 최대 지속 시간 (분)
     
     # 동적 그리드 재설정을 위한 상태 변수
     last_grid_reset_time = None
@@ -6120,23 +6122,32 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             last_update_day = now.day
 
         try:
-            # API 호출을 안전하게 래핑
+            # API 호출을 안전하게 래핑 (개선된 오류 처리)
             try:
                 price = data_manager.get_current_price(ticker)
             except Exception as api_error:
                 api_error_count += 1
-                print(f"가격 데이터 조회 예외 ({api_error_count}/{max_api_errors}): {api_error}")
-                log_and_update('API오류', f'가격 데이터 조회 예외 #{api_error_count}: {str(api_error)}')
+                error_type = type(api_error).__name__
+                print(f"가격 데이터 조회 예외 ({api_error_count}/{max_api_errors}): {error_type} - {api_error}")
+                log_and_update('API오류', f'가격 데이터 조회 예외 #{api_error_count}: {error_type} - {str(api_error)}')
                 update_gui('action_status', 'error')
                 
                 # 연속 API 오류가 너무 많으면 더 긴 대기
                 if api_error_count >= max_api_errors:
-                    print(f"❌ 연속 API 오류 {max_api_errors}회 달성, 60초 대기 후 재시도")
+                    print(f"❌ 연속 API 오류 {max_api_errors}회 달성, 긴급 재연결 시도 중...")
+                    try:
+                        # 데이터 매니저 재초기화 시도
+                        data_manager._initialize_data()
+                        print("🔄 데이터 매니저 재초기화 완료")
+                    except Exception as reset_error:
+                        print(f"데이터 매니저 재초기화 실패: {reset_error}")
+                    
+                    print(f"⏳ 60초 대기 후 재시도...")
                     time.sleep(60)
                     api_error_count = 0  # 카운터 리셋
                 else:
-                    # 지수 백오프: 1초, 2초, 4초, 8초, 최대 30초
-                    backoff_time = min(2 ** (api_error_count - 1), 30)
+                    # 지수 백오프: 2초, 4초, 8초, 16초, 최대 30초
+                    backoff_time = min(2 ** api_error_count, 30)
                     print(f"API 오류 대기: {backoff_time}초")
                     time.sleep(backoff_time)
                 continue
@@ -6439,9 +6450,19 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         if demo_mode:
             # 데모 모드 매수 로직 (하락 추세 추종)
             if buy_pending:
+                # 매수 보류 시간 초과 체크 (30분 이상 보류 시 강제 해제)
+                current_time = datetime.now()
+                if buy_pending_start_time and (current_time - buy_pending_start_time).total_seconds() > (max_buy_pending_minutes * 60):
+                    print(f"⚠️ {ticker} 매수 보류 시간 초과 ({max_buy_pending_minutes}분), 보류 상태 해제")
+                    log_and_update("매수보류해제", f"매수 보류 {max_buy_pending_minutes}분 초과로 자동 해제")
+                    buy_pending = False
+                    buy_pending_start_time = None
+                    lowest_grid_to_buy = -1
+                    update_gui('action_status', 'waiting')
+                
                 # 매수 보류 중일 때
-                # 더 낮은 그리드로 가격이 하락했는지 체크
-                if lowest_grid_to_buy > 0 and price <= grid_levels[lowest_grid_to_buy - 1]:
+                elif lowest_grid_to_buy > 0 and price <= grid_levels[lowest_grid_to_buy - 1]:
+                    # 더 낮은 그리드로 가격이 하락했는지 체크
                     lowest_grid_to_buy -= 1
                     log_msg = f"매수 보류 및 목표 하향: {grid_levels[lowest_grid_to_buy]:,.0f}원"
                     log_and_update("데모 매수보류", log_msg)
@@ -6551,6 +6572,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                         # 매수 실행 후 상태 초기화
                         buy_pending = False
+                        buy_pending_start_time = None
                         lowest_grid_to_buy = -1
 
             else:
@@ -6560,6 +6582,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         already_bought = any(pos['buy_price'] == grid_price for pos in demo_positions)
                         if not already_bought:
                             buy_pending = True
+                            buy_pending_start_time = datetime.now()  # 매수 보류 시작 시간 기록
                             lowest_grid_to_buy = i
                             log_msg = f"매수 그리드 {grid_price:,.0f}원 도달. 매수 보류 시작."
                             reason = f"그리드 레벨 {i+1}/{len(grid_levels)} 도달"
@@ -7040,11 +7063,20 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         if not buy_pending and not any(pos.get('sell_held', False) for pos in demo_positions):
             update_gui('action_status', 'waiting')
             
-        # API rate limiting을 고려한 대기 시간 조정
-        base_sleep_time = 2  # 기본 대기시간을 3초에서 2초로 단축
+        # API rate limiting을 고려한 대기 시간 조정 (개선된 알고리즘)
+        base_sleep_time = 2  # 기본 대기시간
+        
+        # API 오류 상황에 따른 대기 시간 조정
         if api_error_count > 0:
             # API 오류가 있었다면 조금 더 대기
             base_sleep_time = min(3 + api_error_count, 10)
+        elif buy_pending and buy_pending_start_time:
+            # 매수 보류 중일 때는 더 자주 체크 (1.5초)
+            base_sleep_time = 1.5
+        elif len(demo_positions) > 0:
+            # 포지션이 있을 때는 조금 더 자주 체크 (1.8초)
+            base_sleep_time = 1.8
+            
         time.sleep(base_sleep_time)
 
     if stop_event.is_set():
