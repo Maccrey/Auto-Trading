@@ -25,34 +25,198 @@ Previous Versions:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
+# 핵심 라이브러리
 import pyupbit
 import time
 import json
 import threading
+import logging
+import gc
+from typing import Dict, List, Optional, Any, Tuple, Union
+from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+from queue import Queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
+
+# GUI 라이브러리
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from datetime import datetime, timedelta
+
+# 데이터 및 차트 라이브러리
 import requests
-from queue import Queue
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
-import pandas as pd
-import numpy as np
+
+# 기타 유틸리티
 import os
-from pathlib import Path
 import xlsxwriter
 import pyttsx3
 import shutil
+
+# 로깅 시스템 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('trading_bot.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 설정 검증 시스템
+def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """설정 파일 검증 및 무결성 확인"""
+    errors = []
+    
+    # 필수 필드 검사
+    required_fields = [
+        'upbit_access', 'upbit_secret', 'total_investment',
+        'demo_mode', 'auto_trading_mode', 'risk_mode'
+    ]
+    
+    for field in required_fields:
+        if field not in config:
+            errors.append(f"필수 설정 필드 누락: {field}")
+    
+    # 데이터 타입 검사
+    if 'total_investment' in config:
+        try:
+            investment = int(config['total_investment'])
+            if investment <= 0:
+                errors.append("투자금액은 0보다 커야 합니다")
+            if investment > 1000000000:  # 10억 원 제한
+                errors.append("투자금액이 너무 큽니다 (최대 10억원)")
+        except (ValueError, TypeError):
+            errors.append("투자금액이 올바른 숫자가 아닙니다")
+    
+    # 리스크 모드 검사
+    if 'risk_mode' in config:
+        valid_risk_modes = ['보수적', '안정적', '공격적', '극공격적']
+        if config['risk_mode'] not in valid_risk_modes:
+            errors.append(f"잘못된 리스크 모드: {config['risk_mode']}. 사용 가능한 값: {valid_risk_modes}")
+    
+    # API 키 검사 (데모 모드가 아닌 경우)
+    if config.get('demo_mode', 1) == 0:
+        if not config.get('upbit_access') or not config.get('upbit_secret'):
+            errors.append("실거래 모드에서는 Upbit API 키가 필수입니다")
+    
+    return len(errors) == 0, errors
+
+# 거래 안전 검사
+def trading_safety_check(ticker: str, action: str, amount: float, price: float) -> Tuple[bool, str]:
+    """거래 실행 전 안전 검사"""
+    try:
+        # 1. 금액 검사
+        if amount <= 0:
+            return False, f"잘못된 거래 금액: {amount}"
+        
+        # 2. 가격 검사
+        if price <= 0:
+            return False, f"잘못된 가격: {price}"
+        
+        # 3. 최소 거래 금액 검사 (5000원)
+        if amount * price < 5000:
+            return False, f"최소 거래 금액 미달 ({amount * price:.0f}원 < 5000원)"
+        
+        # 4. 최대 단일 거래 금액 검사 (100만원)
+        if amount * price > 1000000:
+            return False, f"단일 거래 금액이 너무 큼 ({amount * price:.0f}원 > 100만원)"
+        
+        # 5. 티커 및 액션 검사
+        valid_tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+        if ticker not in valid_tickers:
+            return False, f"지원하지 않는 코인: {ticker}"
+        
+        valid_actions = ['buy', 'sell']
+        if action not in valid_actions:
+            return False, f"잘못된 거래 액션: {action}"
+        
+        logger.info(f"✅ 거래 안전 검사 통과: {ticker} {action} {amount:.6f} @ {price:,.0f}")
+        return True, "OK"
+        
+    except Exception as e:
+        logger.error(f"❌ 거래 안전 검사 오류: {e}")
+        return False, f"안전 검사 오류: {str(e)}"
+
+# 오류 모니터링 시스템
+class ErrorMonitor:
+    """오류 발생 모니터링 및 알림 시스템"""
+    
+    def __init__(self) -> None:
+        self.error_counts: Dict[str, int] = defaultdict(int)
+        self.recent_errors: List[Dict[str, Any]] = []
+        self.error_lock = threading.Lock()
+        self.max_recent_errors = 100
+        
+    def log_error(self, error_type: str, error_msg: str, context: str = "") -> None:
+        """오류 로깅 및 카운팅"""
+        with self.error_lock:
+            self.error_counts[error_type] += 1
+            
+            error_entry = {
+                'timestamp': datetime.now(),
+                'type': error_type,
+                'message': error_msg[:500],  # 메시지 길이 제한
+                'context': context,
+                'count': self.error_counts[error_type]
+            }
+            
+            self.recent_errors.append(error_entry)
+            
+            # 최대 개수 제한
+            if len(self.recent_errors) > self.max_recent_errors:
+                self.recent_errors = self.recent_errors[-self.max_recent_errors:]
+            
+            # 심각한 오류 알림
+            if self.error_counts[error_type] >= 10:
+                self._send_critical_alert(error_type, self.error_counts[error_type])
+    
+    def _send_critical_alert(self, error_type: str, count: int) -> None:
+        """심각한 오류 알림 발송"""
+        alert_message = f"⚠️ 심각한 오류 발생: {error_type} ({count}회 반복)"
+        logger.critical(alert_message)
+        
+        # TTS 알림 (있는 경우)
+        try:
+            if tts_engine and count % 20 == 10:  # 10의 배수마다 알림
+                speak_async(f"심각한 오류가 {count}회 발생했습니다")
+        except Exception as e:
+            logger.error(f"TTS 알림 오류: {e}")
+    
+    def get_error_summary(self) -> Dict[str, Any]:
+        """오류 요약 정보 반환"""
+        with self.error_lock:
+            return {
+                'total_error_types': len(self.error_counts),
+                'total_errors': sum(self.error_counts.values()),
+                'top_errors': dict(sorted(self.error_counts.items(), key=lambda x: x[1], reverse=True)[:10]),
+                'recent_errors': self.recent_errors[-10:]  # 최근 10개
+            }
+    
+    def clear_old_errors(self, hours: int = 24) -> None:
+        """오래된 오류 로그 정리"""
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        with self.error_lock:
+            self.recent_errors = [e for e in self.recent_errors if e['timestamp'] > cutoff_time]
+            logger.info(f"🧹 {hours}시간 이전 오류 로그 정리 완료")
+
+# 전역 오류 모니터 인스턴스
+error_monitor = ErrorMonitor()
 
 # TTS 엔진 초기화
 try:
     tts_engine = pyttsx3.init()
     # 말하기 속도 조절 (기본값: 200)
     rate = tts_engine.getProperty('rate')
-    tts_engine.setProperty('rate', 150) # 150으로 설정 (보통 속도)
+    tts_engine.setProperty('rate', 150)  # 150으로 설정 (보통 속도)
     
-    tts_queue = Queue()
+    tts_queue = Queue(maxsize=100)  # 큐 크기 제한으로 메모리 보호
     tts_lock = threading.Lock()
     tts_worker_thread = None
     
@@ -60,28 +224,49 @@ try:
     last_alert_time = {}  # 각 코인별 마지막 경고 시간
     alert_cooldown = 60   # 경고 쿨다운 시간 (초)
     
+except (ImportError, RuntimeError, OSError) as e:
+    print(f"⚠️ TTS 엔진 초기화 실패: {type(e).__name__} - {e}")
+    print("📝 TTS 기능이 비활성화됩니다. 거래 기능은 정상 작동합니다.")
+    tts_engine = None
 except Exception as e:
-    print(f"TTS 엔진 초기화 오류: {e}")
+    print(f"❌ TTS 엔진 예상치 못한 오류: {type(e).__name__} - {e}")
     tts_engine = None
 
 # 중앙집중식 API 데이터 관리 시스템
 class CentralizedDataManager:
-    def __init__(self):
-        self.tickers = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
-        self.current_prices = {}  # 현재 가격
-        self.orderbooks = {}      # 호가 데이터
-        self.balances = {}        # 잔고 정보
-        self.ohlcv_data = {}      # OHLCV 데이터 (여러 timeframe)
-        self.last_update = {}     # 마지막 업데이트 시간
+    """API 데이터를 중앙집중식으로 관리하는 클래스"""
+    
+    def __init__(self) -> None:
+        self.tickers: List[str] = ['KRW-BTC', 'KRW-ETH', 'KRW-XRP']
+        self.current_prices: Dict[str, float] = {}  # 현재 가격
+        self.orderbooks: Dict[str, Dict] = {}      # 호가 데이터
+        self.balances: Dict[str, float] = {}        # 잔고 정보
+        self.ohlcv_data: Dict[str, Dict[str, Optional[pd.DataFrame]]] = {}  # OHLCV 데이터
+        self.last_update: Dict[str, datetime] = {}     # 마지막 업데이트 시간
         self.data_lock = threading.Lock()
         self.stop_worker = False
-        self.worker_thread = None
+        self.worker_thread: Optional[threading.Thread] = None
         
         # 데이터 수집 주기 (초) - 실시간 성능 개선을 위해 단축
-        self.update_interval = 2
+        self.update_interval: int = 2
+        self.executor: Optional[ThreadPoolExecutor] = None
         
         # 초기화
         self._initialize_data()
+        self._start_thread_pool()
+        logger.info("🚀 CentralizedDataManager 초기화 완료")
+    
+    def _start_thread_pool(self) -> None:
+        """성능 최적화를 위한 스레드 풀 시작"""
+        self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="DataCollector")
+        logger.info("💪 성능 최적화 스레드 풀 시작 (4 workers)")
+    
+    def _shutdown_thread_pool(self) -> None:
+        """스레드 풀 종료"""
+        if self.executor:
+            self.executor.shutdown(wait=True, timeout=10)
+            self.executor = None
+            logger.info("✅ 스레드 풀 정상 종료")
         
     def _initialize_data(self):
         """데이터 구조 초기화"""
@@ -581,10 +766,10 @@ def safe_shutdown_all_threads():
     
     print("✅ 모든 스레드 안전 종료 완료")
 
-def aggressive_memory_cleanup():
-    """공격적 메모리 정리"""
+def aggressive_memory_cleanup() -> None:
+    """공격적 메모리 정리 및 최적화"""
     try:
-        import gc
+        logger.info("🧹 메모리 최적화 시작")
         
         # 1. 캐시 완전 정리
         cleanup_expired_cache()
@@ -5999,8 +6184,8 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             if len(recent_prices) > 20:
                 recent_prices.pop(0)
             
-            # 동적 그리드 범위 이탈 감지 및 재설정 (설정 활성화 확인)
-            if config.get('enable_dynamic_grid_reset', True):
+            # 동적 그리드 범위 이탈 감지 및 재설정 (자동 거래 모드일 때만)
+            if config.get('enable_dynamic_grid_reset', True) and config.get('auto_trading_mode', False):
                 try:
                     should_reset, reset_reason, reset_info = should_trigger_grid_reset(
                         ticker, price, grid_levels, recent_prices, last_grid_reset_time
@@ -7565,7 +7750,7 @@ def start_dashboard():
         save_config(config)
         update_auto_status()
     
-    auto_trading_var.trace('w', lambda *args: on_auto_trading_change())
+    auto_trading_var.trace_add('write', lambda *_: on_auto_trading_change())
     risk_mode_combo.bind('<<ComboboxSelected>>', on_risk_mode_change)
     
     # 버튼 프레임 준비 (실제 버튼들은 함수 정의 후에 생성)
