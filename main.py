@@ -9442,8 +9442,8 @@ def start_dashboard():
                 elif key == 'allocation_update':
                     # 총자산 업데이트 (자동최적화/복리재배분/거래중 업데이트)
                     try:
-                        updated_total = args[0] if args else 0
                         source = ticker if ticker else "SYSTEM"
+                        updated_total = args if isinstance(args, (int, float)) else (args[0] if args else 0)
                         
                         # 업데이트 타입별 메시지 구성
                         if source == "SYSTEM":
@@ -9470,7 +9470,7 @@ def start_dashboard():
                         print(f"총자산 업데이트 오류: {total_update_error}")
                         # 백업 시도
                         try:
-                            updated_total = args[0] if args else 0
+                            updated_total = args if isinstance(args, (int, float)) else (args[0] if args else 0)
                             backup_text = f"배분된 총자산: {updated_total:,.0f}원 (백업 업데이트)"
                             if 'allocation_label' in globals():
                                 globals()['allocation_label'].config(text=backup_text, style="Orange.TLabel")
