@@ -1,30 +1,3 @@
-"""
-🚀 Auto Grid Trading Bot v4.2.5
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📈 고급 암호화폐 자동거래 봇 - Advanced Cryptocurrency Auto Trading Bot
-💡 지능형 그리드 트레이딩 + AI 기반 자산 배분 시스템
-🎯 BTC, ETH, XRP 대응 | 실시간 차트 | 완전 자동화 지원
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Version: 4.2.5
-Release Date: 2025-08-26
-Author: Auto Trading Team
-
-🔄 v4.2.25 업데이트 내용 (2025-08-26):
-- 🐛 자동 최적화 오류 완전 해결
-- ⚡ 5분 간격 자동 업데이트 지원 (기존 1시간 → 유연한 간격 설정)
-- 🛠️ config 변수 접근 문제 수정
-- 🚀 AutoTradingSystem 최적화 메서드 정확한 호출
-- 💪 시스템 안정성 대폭 향상
-- 🎯 가격 범위 및 그리드 개수 실시간 자동 재계산
-
-Previous Versions:
-- v4.2.0: 메모리 누수 방지 및 스레드 안정성 강화
-- v4.1.0: 지능형 투자금 분배 시스템 및 완전 자동화 모드 도입
-- v4.0.x: 고급 그리드 트레이딩 및 실시간 차트 시스템
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-
 # 핵심 라이브러리
 import pyupbit
 import time
@@ -2603,12 +2576,15 @@ class AutoOptimizationScheduler:
         try:
             global config
             print("💰 복리 재배분 시작...")
+            print(f"🔍 디버그 - 현재 config total_investment: {config.get('total_investment', '0')}")
             
             # 현재 투자금 조회
-            original_investment = int(config.get("total_investment", "0"))
+            original_investment = int(float(config.get("total_investment", "0")))
+            print(f"🔍 디버그 - original_investment (parsed): {original_investment:,}원")
             
             # 실현수익을 포함한 업데이트된 투자금 계산
             updated_investment, total_profit = update_investment_with_profits(original_investment, force_update=True)
+            print(f"🔍 디버그 - update_investment_with_profits 결과: updated={updated_investment:,}원, profit={total_profit:,}원")
             
             if total_profit > 0:
                 print(f"✅ 복리 재배분 완료: 기존 {original_investment:,}원 + 수익 {total_profit:,}원 = 총 {updated_investment:,}원")
@@ -2618,9 +2594,11 @@ class AutoOptimizationScheduler:
                 
                 # GUI 큐를 통한 업데이트 (메인 스레드에서 안전하게 처리)
                 try:
+                    print(f"🔍 디버그 - GUI 큐 업데이트 준비: updated_investment={updated_investment:,.0f}원")
                     if 'gui_queue' in globals():
                         globals()['gui_queue'].put(('allocation_update', 'SYSTEM', updated_investment))
-                        print(f"🔄 GUI 큐 - 총자산 업데이트 요청: {updated_investment:,.0f}원")
+                        print(f"🔄 GUI 큐 - 총자산 업데이트 요청 전송: {updated_investment:,.0f}원")
+                        print(f"🔍 디버그 - GUI 큐 크기: {globals()['gui_queue'].qsize()}")
                     else:
                         print("⚠️ GUI 큐를 찾을 수 없음")
                         
@@ -3430,8 +3408,11 @@ def load_trading_state(ticker, demo_mode):
             with open(state_file, 'r', encoding='utf-8') as f:
                 all_states = json.load(f)
             state_key = f"demo_{ticker}" if demo_mode else f"real_{ticker}"
-            return all_states.get(state_key, [])
-        except (FileNotFoundError, json.JSONDecodeError):
+            positions = all_states.get(state_key, [])
+            print(f"🔍 디버그 - 거래 상태 로드: {ticker} ({state_key}), {len(positions)}개 포지션")
+            return positions
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"⚠️ 거래 상태 로드 실패: {ticker} - {e}")
             return []
 
 
@@ -3833,15 +3814,15 @@ class CoinAllocationSystem:
             return self.allocation_cache
 
 def calculate_total_investment_with_profits():
-    """수익을 포함한 전체 투자금 계산"""
+    """수익을 포함한 전체 투자금 계산 (config의 total_investment는 이미 수익이 반영된 값)"""
     try:
-        # 기본 투자금
+        # config의 total_investment는 이미 실현수익이 반영된 총자산
         total_investment = float(config.get('total_investment', 1000000))
         
-        # 실현된 수익 추가
-        total_realized_profit = calculate_total_realized_profit()
+        print(f"🔍 디버그 - calculate_total_investment_with_profits: {total_investment:,.0f}원 (이미 수익 반영됨)")
         
-        return total_investment + total_realized_profit
+        # 중복 계산 방지: config의 값이 이미 수익을 포함하고 있으므로 추가 계산하지 않음
+        return total_investment
         
     except Exception as e:
         print(f"전체 투자금 계산 오류: {e}")
@@ -3992,10 +3973,13 @@ def load_config():
             # 기본 설정과 로드된 설정을 병합 (새로운 설정 추가 시 기존 파일에 반영)
             merged_config = default_config.copy()
             merged_config.update(config_data)
+            print(f"🔍 디버그 - 설정 로드 완료: total_investment={merged_config.get('total_investment', '없음')}")
             return merged_config
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError) as e:
         # 파일이 없거나 JSON 형식이 잘못된 경우 기본 설정 사용 및 저장
+        print(f"⚠️ 설정 파일 로드 실패: {e}, 기본 설정 사용")
         save_config(default_config)
+        print(f"🔍 디버그 - 기본 설정 사용: total_investment={default_config.get('total_investment', '없음')}")
         return default_config
 
 config = load_config()
@@ -4061,9 +4045,9 @@ def save_profits_data(profits_data):
         try:
             global config
             if 'config' in globals() and config:
-                original_investment = int(config.get("total_investment", "0"))
-                total_realized_profit = calculate_total_realized_profit()
-                updated_total = original_investment + total_realized_profit
+                # config의 total_investment는 이미 수익이 반영된 값이므로 중복 계산 방지
+                updated_total = float(config.get("total_investment", "0"))
+                print(f"🔍 디버그 - save_profit_data GUI 업데이트: {updated_total:,.0f}원 (중복계산 방지)")
                 
                 # GUI에 즉시 반영
                 if 'allocation_label' in globals() and globals()['allocation_label']:
@@ -7485,7 +7469,7 @@ def start_dashboard():
     start_tts_worker()
 
     root = tk.Tk()
-    root.title("그리드 투자 자동매매 대시보드 v4.2.5")
+    root.title("그리드 투자 자동매매 대시보드 v4.2.6")
     root.geometry("1400x900")
 
     def on_closing():
@@ -7635,7 +7619,10 @@ def start_dashboard():
     
     # 초기 총자산 표시 (실현수익 포함)
     try:
+        print(f"🔍 디버그 - 초기 총자산 계산 시작")
+        print(f"🔍 디버그 - 현재 config total_investment: {config.get('total_investment', '없음')}")
         initial_total = calculate_total_investment_with_profits()
+        print(f"🔍 디버그 - calculate_total_investment_with_profits 결과: {initial_total:,.0f}원")
         allocation_label.config(text=f"배분된 총자산: {initial_total:,.0f}원 (실현수익 포함)")
         print(f"💰 초기 총자산 표시: {initial_total:,.0f}원")
     except Exception as e:
@@ -8237,9 +8224,9 @@ def start_dashboard():
                     
                     # 최종 총자산 다시 확인하고 GUI 업데이트
                     try:
-                        final_total = int(config.get("total_investment", "0"))
-                        final_profit = calculate_total_realized_profit()
-                        final_combined = final_total + final_profit
+                        # config의 total_investment는 이미 수익이 반영된 값이므로 중복 계산 방지
+                        final_combined = float(config.get("total_investment", "0"))
+                        print(f"🔍 디버그 - 수동최적화 후 최종 총자산: {final_combined:,.0f}원 (중복계산 방지)")
                         
                         # 최종 GUI 업데이트 한번 더 실행
                         if 'gui_queue' in globals():
