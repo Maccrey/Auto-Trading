@@ -848,12 +848,13 @@ default_config = {
     "performance_tracking": True,  # 실적 추적 활성화
     "auto_optimization": True,  # 자동 최적화 활성화
     
-    # 동적 그리드 재설정 설정
+    # 동적 그리드 재설정 설정 (끊김없는 거래 최적화)
     "enable_dynamic_grid_reset": True,  # 동적 그리드 재설정 활성화
-    "grid_breach_threshold": 5.0,  # 그리드 이탈 감지 임계값 (%)
-    "min_breach_percent": 3.0,  # 최소 이탈 비율 (% 미만은 무시)
-    "max_grid_resets_per_hour": 12,  # 시간당 최대 재설정 횟수
-    "grid_reset_min_interval": 300,  # 재설정 간 최소 간격 (초)
+    "grid_breach_threshold": 3.0,  # 그리드 이탈 감지 임계값 (%) - 더 민감하게
+    "min_breach_percent": 1.5,  # 최소 이탈 비율 (% 미만은 무시) - 더 빠른 반응
+    "max_grid_resets_per_hour": 20,  # 시간당 최대 재설정 횟수 - 증가
+    "grid_reset_min_interval": 120,  # 재설정 간 최소 간격 (초) - 2분으로 단축
+    "seamless_trading": True,  # 끊김없는 거래 모드
     # 코인별 그리드 설정
     "coin_specific_grids": {
         "KRW-BTC": {
@@ -5278,12 +5279,45 @@ def should_trigger_grid_reset(ticker, current_price, grid_levels, recent_prices,
     그리드 재설정 필요성 판단
     """
     try:
-        # 설정값 가져오기
-        breach_threshold = config.get('grid_breach_threshold', 5.0)
-        min_breach = config.get('min_breach_percent', 3.0)
-        min_interval = config.get('grid_reset_min_interval', 300)
+        # 설정값 가져오기 (최적화된 값들)
+        breach_threshold = config.get('grid_breach_threshold', 3.0)
+        min_breach = config.get('min_breach_percent', 1.5)
+        min_interval = config.get('grid_reset_min_interval', 120)
+        seamless_mode = config.get('seamless_trading', True)
         
-        # 1. 그리드 범위 이탈 확인 (설정값 사용)
+        # 1. 예측적 이탈 감지 (끊김없는 거래를 위한 선제 대응)
+        if seamless_mode and len(recent_prices) >= 5:
+            # 가격 변화 속도 분석
+            price_momentum = (current_price - recent_prices[-5]) / recent_prices[-5] * 100
+            
+            # 그리드 범위의 80% 지점에서 예측적 재설정 트리거
+            highest_grid = max(grid_levels) if grid_levels else current_price * 1.1
+            lowest_grid = min(grid_levels) if grid_levels else current_price * 0.9
+            grid_range = highest_grid - lowest_grid
+            
+            upper_80_percent = highest_grid - (grid_range * 0.2)
+            lower_80_percent = lowest_grid + (grid_range * 0.2)
+            
+            # 강한 모멘텀이 있고 80% 지점에 도달한 경우 예측적 재설정
+            if abs(price_momentum) > 2.0:  # 2% 이상 모멘텀
+                if current_price >= upper_80_percent and price_momentum > 0:
+                    print(f"🚀 {ticker} 예측적 상향 재설정 트리거: 모멘텀 {price_momentum:.1f}%")
+                    return True, "predictive_upper", {
+                        "breach_type": "predictive_upper_breach",
+                        "breach_percent": ((current_price - highest_grid) / highest_grid) * 100,
+                        "momentum": price_momentum,
+                        "trigger_reason": f"예측적 상향 재설정 (모멘텀: {price_momentum:.1f}%)"
+                    }
+                elif current_price <= lower_80_percent and price_momentum < 0:
+                    print(f"📉 {ticker} 예측적 하향 재설정 트리거: 모멘텀 {price_momentum:.1f}%")
+                    return True, "predictive_lower", {
+                        "breach_type": "predictive_lower_breach", 
+                        "breach_percent": ((lowest_grid - current_price) / lowest_grid) * 100,
+                        "momentum": price_momentum,
+                        "trigger_reason": f"예측적 하향 재설정 (모멘텀: {price_momentum:.1f}%)"
+                    }
+        
+        # 2. 기존 그리드 범위 이탈 확인 (반응적)
         is_breached, breach_type, breach_percent = check_grid_boundary_breach(
             current_price, grid_levels, breach_threshold
         )
@@ -5291,20 +5325,23 @@ def should_trigger_grid_reset(ticker, current_price, grid_levels, recent_prices,
         if not is_breached:
             return False, "no_breach", {}
         
-        # 2. 최소 재설정 간격 확인 (설정값 사용)
+        # 3. 최소 재설정 간격 확인 (끊김없는 모드에서는 더 관대하게)
         if last_reset_time:
             time_since_reset = (datetime.now() - last_reset_time).total_seconds()
-            if time_since_reset < min_interval:
-                return False, "too_soon", {"seconds_left": min_interval - time_since_reset}
+            effective_min_interval = min_interval if not seamless_mode else min_interval * 0.7
+            if time_since_reset < effective_min_interval:
+                return False, "too_soon", {"seconds_left": effective_min_interval - time_since_reset}
         
-        # 3. 이탈 심각성 확인 (설정값 사용)
-        if breach_percent < min_breach:
+        # 4. 이탈 심각성 확인 (끊김없는 모드에서는 더 관대하게)
+        effective_min_breach = min_breach if not seamless_mode else min_breach * 0.8
+        if abs(breach_percent) < effective_min_breach:
             return False, "minor_breach", {"breach_percent": breach_percent}
         
-        # 4. 트렌드 지속성 확인 (최근 10틱 평균)
-        if len(recent_prices) >= 10:
-            trend_strength = (recent_prices[-1] - recent_prices[-10]) / recent_prices[-10] * 100
-            if abs(trend_strength) < 1.0:  # 약한 트렌드는 일시적 이탈로 간주
+        # 5. 트렌드 지속성 확인 (끊김없는 모드에서는 더 관대하게)
+        if len(recent_prices) >= 8:
+            trend_strength = (recent_prices[-1] - recent_prices[-8]) / recent_prices[-8] * 100
+            trend_threshold = 0.5 if seamless_mode else 1.0
+            if abs(trend_strength) < trend_threshold:
                 return False, "weak_trend", {"trend_strength": trend_strength}
         
         # 5. 재설정 필요 조건 충족
@@ -5330,20 +5367,31 @@ def calculate_adaptive_grid_range(ticker, current_price, breach_type, recent_pri
         volatility_window = recent_prices[-20:] if recent_prices and len(recent_prices) >= 20 else [current_price]
         price_std = np.std(volatility_window) if len(volatility_window) > 1 else current_price * 0.02
         
-        # 2. 이탈 방향에 따른 비대칭 범위 설정
-        if breach_type == "upper_breach":
-            # 상향 이탈시: 현재가를 60% 지점으로 설정 (더 많은 상승 여유 확보)
-            range_size = max(price_std * 4, current_price * 0.15)  # 최소 15% 범위
-            new_low = current_price - (range_size * 0.6)
-            new_high = current_price + (range_size * 0.4) 
-        elif breach_type == "lower_breach":
-            # 하향 이탈시: 현재가를 40% 지점으로 설정 (더 많은 하락 여유 확보)  
-            range_size = max(price_std * 4, current_price * 0.15)  # 최소 15% 범위
-            new_low = current_price - (range_size * 0.4)
-            new_high = current_price + (range_size * 0.6)
+        # 2. 끊김없는 거래를 위한 최적화된 범위 설정
+        seamless_mode = config.get('seamless_trading', True)
+        base_range_multiplier = 0.18 if seamless_mode else 0.15  # 18% vs 15%
+        
+        # 3. 이탈 방향과 타입에 따른 적응적 범위 설정
+        if "predictive" in breach_type:
+            # 예측적 재설정: 더 넓은 범위로 여유있게 설정
+            range_multiplier = base_range_multiplier * 1.3
         else:
-            # 기본: 현재가 중심의 대칭 범위
-            range_size = max(price_std * 3, current_price * 0.12)
+            # 반응적 재설정: 표준 범위
+            range_multiplier = base_range_multiplier
+            
+        if breach_type in ["upper_breach", "predictive_upper_breach"]:
+            # 상향 이탈시: 현재가를 55% 지점으로 설정 (상승 여유 확보)
+            range_size = max(price_std * 5, current_price * range_multiplier)
+            new_low = current_price - (range_size * 0.55)  
+            new_high = current_price + (range_size * 0.45)
+        elif breach_type in ["lower_breach", "predictive_lower_breach"]:
+            # 하향 이탈시: 현재가를 45% 지점으로 설정 (하락 여유 확보)
+            range_size = max(price_std * 5, current_price * range_multiplier)
+            new_low = current_price - (range_size * 0.45)  
+            new_high = current_price + (range_size * 0.55)
+        else:
+            # 기본 케이스: 현재가 중심 대칭 범위
+            range_size = max(price_std * 4, current_price * range_multiplier)
             new_low = current_price - (range_size * 0.5)  
             new_high = current_price + (range_size * 0.5)
         
@@ -6298,6 +6346,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         else:
                             new_grid_count = grid_count
                         
+                        # 기존 포지션 백업 (끊김없는 거래를 위해)
+                        existing_positions = demo_positions.copy() if demo_positions else []
+                        existing_buy_pending = buy_pending
+                        existing_lowest_grid_to_buy = lowest_grid_to_buy
+                        
                         # 새 그리드 레벨 생성
                         new_price_gap = (new_high - new_low) / new_grid_count
                         new_grid_levels = [new_low + (new_price_gap * i) for i in range(new_grid_count + 1)]
@@ -6305,6 +6358,33 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         # 현재 투자금액 기준으로 격당 투자금액 재계산
                         current_total_value = demo_balance + sum(pos['quantity'] * price for pos in demo_positions)
                         amount_per_grid = current_total_value / new_grid_count
+                        
+                        # 기존 포지션들을 새 그리드에 맞게 조정 (끊김없는 거래)
+                        if config.get('seamless_trading', True) and existing_positions:
+                            adjusted_positions = []
+                            for pos in existing_positions:
+                                # 기존 포지션의 목표 매도가를 새 그리드에 맞게 재계산
+                                pos_price = pos['buy_price']
+                                
+                                # 현재 포지션 가격에 가장 가까운 새 그리드 찾기
+                                closest_grid_idx = min(range(len(new_grid_levels)), 
+                                                     key=lambda i: abs(new_grid_levels[i] - pos_price))
+                                
+                                # 새 목표 매도가 설정 (바로 위 그리드)
+                                if closest_grid_idx < len(new_grid_levels) - 1:
+                                    new_target_sell = new_grid_levels[closest_grid_idx + 1]
+                                else:
+                                    new_target_sell = pos_price * 1.005  # 0.5% 수익 목표
+                                
+                                # 포지션 정보 업데이트
+                                updated_pos = pos.copy()
+                                updated_pos['target_sell_price'] = new_target_sell
+                                adjusted_positions.append(updated_pos)
+                                
+                                print(f"🔄 {ticker} 포지션 조정: {pos_price:,.0f}원 → 목표: {new_target_sell:,.0f}원")
+                            
+                            demo_positions = adjusted_positions
+                            print(f"✅ {ticker} 기존 {len(adjusted_positions)}개 포지션 새 그리드에 맞게 조정 완료")
                         
                         # 글로벌 변수 업데이트
                         high_price, low_price = new_high, new_low
@@ -6332,9 +6412,26 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         
                         print(f"🔄 {ticker} {reset_msg}")
                         
-                        # 기존 매수 대기 상태 리셋 (새 그리드에 맞춰)
-                        buy_pending = False
-                        lowest_grid_to_buy = -1
+                        # 스마트한 매수 대기 상태 조정 (끊김없는 거래)
+                        if config.get('seamless_trading', True) and existing_buy_pending:
+                            # 기존 대기 중인 그리드를 새 그리드에 맞게 매핑
+                            if existing_lowest_grid_to_buy >= 0 and existing_lowest_grid_to_buy < len(grid_levels):
+                                old_grid_price = grid_levels[existing_lowest_grid_to_buy] if len(grid_levels) > existing_lowest_grid_to_buy else price
+                                
+                                # 새 그리드에서 가장 가까운 레벨 찾기
+                                new_closest_idx = min(range(len(new_grid_levels)), 
+                                                    key=lambda i: abs(new_grid_levels[i] - old_grid_price))
+                                
+                                buy_pending = True
+                                lowest_grid_to_buy = new_closest_idx
+                                print(f"🔄 {ticker} 매수 대기 상태 유지: 그리드 {existing_lowest_grid_to_buy} → {new_closest_idx}")
+                            else:
+                                buy_pending = False
+                                lowest_grid_to_buy = -1
+                        else:
+                            # 일반 모드: 기존 매수 대기 상태 리셋
+                            buy_pending = False
+                            lowest_grid_to_buy = -1
                         
                 except Exception as grid_reset_error:
                     print(f"⚠️ 그리드 재설정 처리 오류 ({ticker}): {grid_reset_error}")
