@@ -30,6 +30,8 @@ import os
 import xlsxwriter
 import pyttsx3
 import shutil
+import signal
+import sys
 
 # 로깅 시스템 설정
 logging.basicConfig(
@@ -741,6 +743,24 @@ def safe_shutdown_all_threads():
         print(f"캐시 정리 오류: {e}")
     
     print("✅ 모든 스레드 안전 종료 완료")
+
+def signal_handler(signum, frame):
+    """시그널 핸들러 (Ctrl+C 등)"""
+    print(f"\n🛑 종료 신호 수신: {signum}")
+    print("안전한 종료를 위해 잠시 기다려주세요...")
+    
+    try:
+        # 글로벌 종료 플래그 설정
+        if 'stop_event' in globals() and stop_event:
+            stop_event.set()
+            print("✅ 거래 루프 종료 신호 전송")
+        
+        safe_shutdown_all_threads()
+    except Exception as e:
+        print(f"종료 과정 중 오류: {e}")
+    finally:
+        print("🔚 프로그램을 종료합니다.")
+        sys.exit(0)
 
 def aggressive_memory_cleanup() -> None:
     """공격적 메모리 정리 및 최적화"""
@@ -3954,16 +3974,48 @@ current_log_popup = None
 current_log_tree = None
 
 def initialize_upbit():
-    """업비트 API 초기화"""
+    """업비트 API 초기화 (강화된 로깅)"""
     global upbit
-    if config["upbit_access"] and config["upbit_secret"]:
-        try:
-            upbit = pyupbit.Upbit(config["upbit_access"], config["upbit_secret"])
-            return True
-        except Exception as e:
-            print(f"업비트 API 초기화 실패: {e}")
+    try:
+        if not config.get("upbit_access") or not config.get("upbit_secret"):
+            logger.warning("⚠️ API 키가 설정되지 않음 - 데모 모드 권장")
+            print("⚠️ API 키가 설정되지 않음 - 데모 모드에서만 사용 가능")
             return False
-    return False
+            
+        logger.info(f"🔑 Upbit API 초기화 시작...")
+        print(f"🔑 Upbit API 연결 시도 중...")
+        
+        upbit = pyupbit.Upbit(config["upbit_access"], config["upbit_secret"])
+        
+        # API 연결 테스트
+        try:
+            balances = upbit.get_balances()
+            if balances is not None:
+                logger.info("✅ Upbit API 초기화 및 연결 테스트 성공")
+                print("✅ Upbit API 연결 성공")
+                return True
+            else:
+                raise Exception("잔고 조회 실패 - API 키 권한 확인 필요")
+                
+        except Exception as test_error:
+            logger.error(f"❌ API 연결 테스트 실패: {test_error}")
+            print(f"❌ API 연결 테스트 실패: {test_error}")
+            return False
+            
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"❌ Upbit API 초기화 실패: {error_msg}")
+        print(f"❌ Upbit API 초기화 실패: {error_msg}")
+        
+        # 오류 유형별 상세 안내
+        if "invalid" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            print("🔍 API 키가 잘못되었거나 권한이 부족합니다")
+        elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+            print("🌐 네트워크 연결 문제가 있습니다")
+        else:
+            print("🔧 API 설정을 확인해주세요")
+            
+        return False
 
 def load_config():
     """설정 파일 로드"""
@@ -5619,7 +5671,7 @@ def has_trade_logs(ticker):
 # 개선된 그리드 트레이딩 로직
 def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_percent_str, period, stop_event, gui_queue, total_profit_label, total_profit_rate_label, all_ticker_total_values, all_ticker_start_balances, profits_data, should_resume=False):
     """개선된 그리드 트레이딩 (급락장 대응 포함)"""
-    global config  # 전역 config 변수 접근을 위한 선언
+    global config, upbit  # 전역 변수 접근을 위한 선언
     start_time = datetime.now()
 
     # 목표 수익률 처리
@@ -6115,20 +6167,46 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             except Exception as api_error:
                 api_error_count += 1
                 error_type = type(api_error).__name__
+                error_msg = str(api_error)
+                
                 print(f"가격 데이터 조회 예외 ({api_error_count}/{max_api_errors}): {error_type} - {api_error}")
-                log_and_update('API오류', f'가격 데이터 조회 예외 #{api_error_count}: {error_type} - {str(api_error)}')
+                log_and_update('API오류', f'가격 데이터 조회 예외 #{api_error_count}: {error_type} - {error_msg}')
                 update_gui('action_status', 'error')
+                
+                # API 키 관련 오류 체크 (치명적 오류)
+                if "invalid" in error_msg.lower() or "unauthorized" in error_msg.lower() or "access" in error_msg.lower():
+                    logger.critical(f"🔑 API 인증 오류 감지: {error_msg}")
+                    print(f"🔑 API 인증 오류 감지: {error_msg}")
+                    log_and_update('치명적오류', f'API 인증 실패 - 거래 중단: {error_msg}')
+                    update_gui('status', "상태: API 인증 오류", "Red.TLabel", False, False)
+                    speak_async("API 인증 오류로 거래를 중단합니다")
+                    break  # 거래 루프 완전 중단
                 
                 # 연속 API 오류가 너무 많으면 더 긴 대기
                 if api_error_count >= max_api_errors:
                     print(f"❌ 연속 API 오류 {max_api_errors}회 달성, 긴급 재연결 시도 중...")
                     try:
+                        # 업비트 API 재초기화 시도
+                        upbit = None
+                        initialize_upbit()
+                        
                         # 데이터 매니저 재초기화 시도
                         data_manager._initialize_data()
-                        print("🔄 데이터 매니저 재초기화 완료")
+                        print("🔄 API 및 데이터 매니저 재초기화 완료")
+                        
+                        # 테스트 API 호출로 검증
+                        test_price = pyupbit.get_current_price("KRW-BTC")
+                        if test_price:
+                            print(f"✅ API 재연결 성공 (테스트 가격: {test_price:,.0f}원)")
+                            api_error_count = 0  # 성공 시 카운터 완전 리셋
+                        else:
+                            raise Exception("테스트 API 호출 실패")
+                            
                     except Exception as reset_error:
-                        print(f"데이터 매니저 재초기화 실패: {reset_error}")
-                    
+                        print(f"⚠️ API 재초기화 실패: {reset_error}")
+                        print("🛑 5분 후 재시도합니다...")
+                        time.sleep(300)  # 5분 대기
+                        
                     print(f"⏳ 60초 대기 후 재시도...")
                     time.sleep(60)
                     api_error_count = 0  # 카운터 리셋
@@ -6177,10 +6255,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                 print(f"✅ API 오류 해결됨 (연속 오류 {api_error_count}회 종료)")
                 api_error_count = 0
             
-            # 가격 히스토리 업데이트 (최대 20개 유지)
+            # 가격 히스토리 업데이트 (메모리 효율적 관리)
             recent_prices.append(price)
             if len(recent_prices) > 20:
-                recent_prices.pop(0)
+                recent_prices = recent_prices[-15:]  # 더 효율적인 슬라이싱
             
             # 동적 그리드 범위 이탈 감지 및 재설정 (자동 거래 모드일 때만)
             if config.get('enable_dynamic_grid_reset', True) and config.get('auto_trading_mode', False):
@@ -6332,10 +6410,10 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         update_gui('price', f"현재가: {price:,.0f}원", "Black.TLabel")
         update_gui('running_time', f"운영시간: {running_time_str}")
         
-        # 가격 히스토리 업데이트 (급락 감지용 + 고급 그리드용)
+        # 가격 히스토리 업데이트 (급락 감지용 + 고급 그리드용, 메모리 효율적)
         previous_prices.append(price)
-        if len(previous_prices) > 30:  # 최근 30개만 유지
-            previous_prices.pop(0)
+        if len(previous_prices) > 30:
+            previous_prices = previous_prices[-20:]  # 더 효율적인 슬라이싱
         
         # 고급 그리드 상태 업데이트
         advanced_grid_state.add_price_history(price)
@@ -9257,10 +9335,14 @@ def start_dashboard():
             print(f"❌ 코인 정보 업데이트 오류: {e}")
     
     def process_gui_queue():
-        """GUI 큐 처리"""
-        while not gui_queue.empty():
+        """GUI 큐 처리 (메모리 누수 방지)"""
+        processed_count = 0
+        max_process_per_cycle = 50  # 한 번에 처리할 최대 메시지 수
+        
+        while not gui_queue.empty() and processed_count < max_process_per_cycle:
             try:
                 key, ticker, args = gui_queue.get_nowait()
+                processed_count += 1
                 if key == 'log':
                     add_log_to_gui(args[0])
                 elif key == 'status':
@@ -9709,7 +9791,14 @@ def start_dashboard():
     
     # 초기화
     process_gui_queue()
-    initialize_upbit()  # 업비트 API 초기화
+    
+    # 업비트 API 초기화 (시작 시 상태 확인)
+    logger.info("🚀 트레이딩 봇 시작 - API 초기화")
+    api_init_result = initialize_upbit()
+    if api_init_result:
+        logger.info("✅ 실거래 모드 사용 가능")
+    else:
+        logger.info("⚠️ 데모 모드만 사용 가능")
     
     # 자동 백업 시작
     root.after(5000, periodic_backup_check)  # 5초 후 시작
@@ -9732,9 +9821,22 @@ def start_dashboard():
     root.mainloop()
 
 if __name__ == "__main__":
-    initialize_files()
-    # 중앙집중식 데이터 수집 워커 시작
-    data_manager.start_worker()
-    # 앱 시작 시 거래 횟수 초기화 (기존 로그 기반으로)
-    initialize_trade_counts_from_logs()
-    start_dashboard()
+    # 시그널 핸들러 등록 (안전한 종료를 위해)
+    signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # 프로세스 종료 신호
+    print("🛡️ 안전한 종료 메커니즘 활성화 (Ctrl+C로 정상 종료)")
+    
+    try:
+        initialize_files()
+        # 중앙집중식 데이터 수집 워커 시작
+        data_manager.start_worker()
+        # 앱 시작 시 거래 횟수 초기화 (기존 로그 기반으로)
+        initialize_trade_counts_from_logs()
+        start_dashboard()
+    except KeyboardInterrupt:
+        print("\n🛑 키보드 인터럽트 감지")
+        signal_handler(signal.SIGINT, None)
+    except Exception as e:
+        print(f"❌ 프로그램 실행 중 오류: {e}")
+        safe_shutdown_all_threads()
+        sys.exit(1)
