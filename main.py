@@ -7644,7 +7644,7 @@ def start_dashboard():
     start_tts_worker()
 
     root = tk.Tk()
-    root.title("그리드 투자 자동매매 대시보드 v4.2.6")
+    root.title("그리드 투자 자동매매 대시보드 v4.2.7")
     root.geometry("1400x900")
 
     def on_closing():
