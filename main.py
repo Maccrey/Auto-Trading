@@ -867,7 +867,7 @@ default_config = {
     "custom_high_price": "",    # 상한선
     "custom_low_price": "",     # 하한선
     "advanced_grid_trading": True,  # 고급 그리드 거래 활성화
-    "grid_confirmation_buffer": 0.1,  # 그리드 확인 버퍼 (%)
+    "grid_confirmation_buffer": 0.05,  # 그리드 확인 버퍼 (%) - 매매 빈도 증가
     "fee_rate": 0.0005,  # 거래 수수료율 (0.05%)
     "auto_trading_mode": False,  # 완전 자동 거래 모드
     "risk_mode": "보수적",  # 리스크 모드 (보수적, 안정적, 공격적, 극공격적)
@@ -1252,9 +1252,9 @@ class CoinSpecificGridManager:
             
             # 기본 파라미터
             base_params = {
-                'confirmation_buffer': 0.1,  # 기본 0.1%
-                'target_profit': 0.5,  # 기본 0.5%
-                'min_profit_for_trend_sell': 0.05,  # 기본 0.05%
+                'confirmation_buffer': 0.05,  # 기본 0.05% (매매 빈도 증가)
+                'target_profit': 0.1,  # 기본 0.1% (적극적)
+                'min_profit_for_trend_sell': 0.01,  # 기본 0.01% (적극적)
                 'grid_spacing_multiplier': 1.0  # 기본 그리드 간격
             }
             
@@ -1262,22 +1262,22 @@ class CoinSpecificGridManager:
             if intensity == 'high':  # 고변동성 (8%+) - 매매 빈도 극대화
                 params = {
                     'confirmation_buffer': max(0.01, volatility * 0.1),  # 0.01% ~ 1.5% (대폭 낮춤)
-                    'target_profit': max(0.05, amplitude * 0.03),  # 0.05% ~ 0.6% (매우 낮춤)
-                    'min_profit_for_trend_sell': 0.005,  # 0.5%만으로도 매도 허용
+                    'target_profit': max(0.02, amplitude * 0.02),  # 0.02% ~ 0.4% (매우 낮춤)
+                    'min_profit_for_trend_sell': 0.001,  # 0.1%만으로도 매도 허용
                     'grid_spacing_multiplier': 0.3  # 그리드 간격 30%로 대폭 축소
                 }
             elif intensity == 'medium':  # 중변동성 (4-8%) - 매매 빈도 크게 증가
                 params = {
                     'confirmation_buffer': max(0.02, volatility * 0.15),  # 0.02% ~ 2.25% (대폭 낮춤)
-                    'target_profit': max(0.08, amplitude * 0.05),  # 0.08% ~ 1.0% (대폭 낮춤)
-                    'min_profit_for_trend_sell': 0.01,  # 1%만으로도 매도 허용
+                    'target_profit': max(0.05, amplitude * 0.03),  # 0.05% ~ 0.6% (대폭 낮춤)
+                    'min_profit_for_trend_sell': 0.005,  # 0.5%만으로도 매도 허용
                     'grid_spacing_multiplier': 0.5  # 그리드 간격 50%로 축소
                 }
             else:  # 저변동성 (4% 미만) - 적극적으로 변경
                 params = {
                     'confirmation_buffer': max(0.03, volatility * 0.2),  # 0.03% ~ 3.0% (낮춤)
-                    'target_profit': max(0.12, amplitude * 0.08),  # 0.12% ~ 1.6% (낮춤)
-                    'min_profit_for_trend_sell': 0.02,  # 2%만으로도 매도 허용
+                    'target_profit': max(0.08, amplitude * 0.05),  # 0.08% ~ 1.0% (낮춤)
+                    'min_profit_for_trend_sell': 0.01,  # 1%만으로도 매도 허용
                     'grid_spacing_multiplier': 0.7  # 그리드 간격 70%로 축소
                 }
             
@@ -1540,7 +1540,7 @@ class AutoTradingSystem:
                 "panic_threshold": -3.0,  # 3% 하락시 급락 감지
                 "stop_loss_threshold": -5.0,  # 5% 손절
                 "trailing_stop_percent": 2.0,  # 2% 트레일링 스탑
-                "grid_confirmation_buffer": 0.2,  # 확인 버퍼 크게
+                "grid_confirmation_buffer": 0.1,  # 확인 버퍼 감소
                 "rebalance_threshold": 0.05  # 5% 변동시 리밸런싱
             },
             "안정적": {
@@ -1549,7 +1549,7 @@ class AutoTradingSystem:
                 "panic_threshold": -5.0,
                 "stop_loss_threshold": -8.0,
                 "trailing_stop_percent": 3.0,
-                "grid_confirmation_buffer": 0.15,
+                "grid_confirmation_buffer": 0.08,
                 "rebalance_threshold": 0.08
             },
             "공격적": {
@@ -1558,7 +1558,7 @@ class AutoTradingSystem:
                 "panic_threshold": -7.0,
                 "stop_loss_threshold": -12.0,
                 "trailing_stop_percent": 4.0,
-                "grid_confirmation_buffer": 0.1,
+                "grid_confirmation_buffer": 0.03,
                 "rebalance_threshold": 0.12
             },
             "극공격적": {
@@ -1567,7 +1567,7 @@ class AutoTradingSystem:
                 "panic_threshold": -10.0,
                 "stop_loss_threshold": -15.0,
                 "trailing_stop_percent": 5.0,
-                "grid_confirmation_buffer": 0.05,
+                "grid_confirmation_buffer": 0.02,
                 "rebalance_threshold": 0.15
             }
         }
@@ -4294,6 +4294,7 @@ class UnifiedTradingLogic:
     
     def __init__(self, ticker, grid_levels, amount_per_grid, fee_rate, target_profit_percent):
         self.ticker = ticker
+        self.ticker_for_logs = ticker  # 로그용 티커명 추가
         self.grid_levels = grid_levels
         self.amount_per_grid = amount_per_grid
         self.fee_rate = fee_rate
@@ -4447,6 +4448,99 @@ class UnifiedTradingLogic:
         self.buy_pending = False
         self.buy_pending_start_time = None
         self.lowest_grid_to_buy = -1
+    
+    def calculate_price_volatility(self, ticker, timeframe_hours=24):
+        """가격 변동성(진폭) 계산 - 매매 빈도 조정용"""
+        try:
+            # 변동성 계산을 위한 최근 24시간 데이터 수집
+            df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)
+            if df is None or len(df) < 12:
+                return {'volatility': 0.05, 'amplitude': 0.03, 'trading_intensity': 'normal'}
+            
+            # 1. 변동성 계산 (ATR 방식)
+            high_low = df['high'] - df['low']
+            high_close = abs(df['high'] - df['close'].shift(1))
+            low_close = abs(df['low'] - df['close'].shift(1))
+            
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            atr = true_range.rolling(window=12).mean().iloc[-1]
+            current_price = df['close'].iloc[-1]
+            atr_percentage = (atr / current_price) * 100 if current_price > 0 else 0
+            
+            # 2. 진폭 계산 (24시간 고저 차이)
+            price_range = df['high'].max() - df['low'].min()
+            amplitude = (price_range / current_price) * 100 if current_price > 0 else 0
+            
+            # 3. 거래 강도 결정
+            if amplitude >= 8.0:  # 8% 이상
+                trading_intensity = 'high'  # 고변동성
+            elif amplitude >= 4.0:  # 4-8%
+                trading_intensity = 'medium'  # 중변동성
+            else:  # 4% 미만
+                trading_intensity = 'low'  # 저변동성
+            
+            volatility_data = {
+                'volatility': min(atr_percentage, 15.0),  # ATR 방식 변동성 (15% 제한)
+                'amplitude': min(amplitude, 20.0),  # 진폭 (20% 제한)
+                'trading_intensity': trading_intensity,
+                'current_price': current_price
+            }
+            
+            print(f"📈 {ticker} 변동성 분석: ATR={atr_percentage:.2f}%, 진폭={amplitude:.2f}%, 강도={trading_intensity}")
+            return volatility_data
+            
+        except Exception as e:
+            print(f"⚠️ 변동성 계산 오류 ({ticker}): {e}")
+            return {'volatility': 0.05, 'amplitude': 0.03, 'trading_intensity': 'normal'}
+    
+    def get_dynamic_trading_params(self, ticker, volatility_data):
+        """변동성 기반 동적 매매 파라미터 설정"""
+        try:
+            volatility = volatility_data.get('volatility', 0.05)
+            amplitude = volatility_data.get('amplitude', 0.03)
+            intensity = volatility_data.get('trading_intensity', 'normal')
+            
+            # 기본 파라미터
+            base_params = {
+                'confirmation_buffer': 0.05,  # 기본 0.05% (매매 빈도 증가)
+                'target_profit': 0.1,  # 기본 0.1% (적극적)
+                'min_profit_for_trend_sell': 0.01,  # 기본 0.01% (적극적)
+                'grid_spacing_multiplier': 1.0  # 기본 그리드 간격
+            }
+            
+            # 변동성에 따른 동적 조정 - 매매 빈도 최대화를 위한 적극적 조정
+            if intensity == 'high':  # 고변동성 (8%+) - 매매 빈도 극대화
+                params = {
+                    'confirmation_buffer': max(0.01, volatility * 0.1),  # 0.01% ~ 1.5% (대폭 낮춤)
+                    'target_profit': max(0.02, amplitude * 0.02),  # 0.02% ~ 0.4% (매우 낮춤)
+                    'min_profit_for_trend_sell': 0.001,  # 0.1%만으로도 매도 허용
+                    'grid_spacing_multiplier': 0.3  # 그리드 간격 30%로 대폭 축소
+                }
+            elif intensity == 'medium':  # 중변동성 (4-8%) - 매매 빈도 크게 증가
+                params = {
+                    'confirmation_buffer': max(0.02, volatility * 0.15),  # 0.02% ~ 2.25% (대폭 낮춤)
+                    'target_profit': max(0.05, amplitude * 0.03),  # 0.05% ~ 0.6% (대폭 낮춤)
+                    'min_profit_for_trend_sell': 0.005,  # 0.5%만으로도 매도 허용
+                    'grid_spacing_multiplier': 0.5  # 그리드 간격 50%로 축소
+                }
+            else:  # 저변동성 (4% 미만) - 적극적으로 변경
+                params = {
+                    'confirmation_buffer': max(0.03, volatility * 0.2),  # 0.03% ~ 3.0% (낮춤)
+                    'target_profit': max(0.08, amplitude * 0.05),  # 0.08% ~ 1.0% (낮춤)
+                    'min_profit_for_trend_sell': 0.01,  # 1%만으로도 매도 허용
+                    'grid_spacing_multiplier': 0.7  # 그리드 간격 70%로 축소
+                }
+            
+            # 최대/최소 제한 설정
+            params['confirmation_buffer'] = min(params['confirmation_buffer'], 0.5)  # 최대 0.5%
+            params['target_profit'] = min(params['target_profit'], 2.0)  # 최대 2.0%
+            params['min_profit_for_trend_sell'] = max(params['min_profit_for_trend_sell'], 0.01)  # 최소 0.01%
+            
+            return params
+            
+        except Exception as e:
+            print(f"⚠️ 동적 매매 파라미터 계산 오류 ({ticker}): {e}")
+            return base_params
 
 def initialize_real_trading_with_balance():
     """실거래 모드에서 업비트 잔고를 기반으로 초기화 (Windows 호환성 강화)"""
@@ -4719,8 +4813,8 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
                 should_sell = True
                 sell_reason = f"트레일링스톱({profit_rate:.1f}%)"
             
-            # 3. 지능적 수익 실현 (트렌드 분석 기반)
-            elif current_price > buy_price * 1.005:  # 0.5% 이상 수익시
+            # 3. 지능적 수익 실현 (트렌드 분석 기반) - 수익이 있으면 즉시 실현
+            elif current_price > buy_price * 1.001:  # 0.1% 이상 수익시 매도 (매우 적극적)
                 should_sell = True
                 sell_reason = f"수익실현({profit_rate:.1f}%)"
             # 4. 트렌드 변화 기반 조기 매도 (메인 거래 로직에서 구현됨)
@@ -7102,7 +7196,7 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                                 if closest_grid_idx < len(new_grid_levels) - 1:
                                     new_target_sell = new_grid_levels[closest_grid_idx + 1]
                                 else:
-                                    new_target_sell = pos_price * 1.005  # 0.5% 수익 목표
+                                    new_target_sell = pos_price * 1.001  # 0.1% 수익 목표 (적극적)
                                 
                                 # 포지션 정보 업데이트
                                 updated_pos = pos.copy()
