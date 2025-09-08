@@ -3254,6 +3254,197 @@ class AdvancedTechnicalAnalyzer:
             return None
         return (prices[-1] / prices[-period-1] - 1) * 100
     
+    def detect_peaks_valleys(self, prices, window=5, min_change_percent=0.5):
+        """파동의 고점과 저점을 감지"""
+        if len(prices) < window * 2 + 1:
+            return {'peaks': [], 'valleys': [], 'current_trend': 'unknown'}
+        
+        prices_array = np.array(prices)
+        peaks = []
+        valleys = []
+        
+        for i in range(window, len(prices_array) - window):
+            # 고점 감지 (주변보다 높은 지점)
+            is_peak = True
+            is_valley = True
+            
+            for j in range(i - window, i + window + 1):
+                if j != i:
+                    if prices_array[i] <= prices_array[j]:
+                        is_peak = False
+                    if prices_array[i] >= prices_array[j]:
+                        is_valley = False
+            
+            # 최소 변화율 확인
+            if is_peak:
+                local_min = min(prices_array[i-window:i+window+1])
+                if (prices_array[i] - local_min) / local_min * 100 >= min_change_percent:
+                    peaks.append({'index': i, 'price': prices_array[i], 'strength': self._calculate_peak_strength(prices_array, i, window)})
+            
+            if is_valley:
+                local_max = max(prices_array[i-window:i+window+1])
+                if (local_max - prices_array[i]) / prices_array[i] * 100 >= min_change_percent:
+                    valleys.append({'index': i, 'price': prices_array[i], 'strength': self._calculate_valley_strength(prices_array, i, window)})
+        
+        # 현재 트렌드 판단
+        current_trend = self._analyze_current_trend(prices_array, peaks, valleys)
+        
+        return {
+            'peaks': peaks[-5:],  # 최근 5개만
+            'valleys': valleys[-5:],  # 최근 5개만
+            'current_trend': current_trend,
+            'trend_strength': self._calculate_trend_strength(prices_array[-20:])
+        }
+    
+    def _calculate_peak_strength(self, prices, peak_idx, window):
+        """고점의 강도 계산"""
+        peak_price = prices[peak_idx]
+        surrounding_prices = prices[peak_idx-window:peak_idx+window+1]
+        avg_surrounding = np.mean(surrounding_prices)
+        return (peak_price - avg_surrounding) / avg_surrounding * 100
+    
+    def _calculate_valley_strength(self, prices, valley_idx, window):
+        """저점의 강도 계산"""
+        valley_price = prices[valley_idx]
+        surrounding_prices = prices[valley_idx-window:valley_idx+window+1]
+        avg_surrounding = np.mean(surrounding_prices)
+        return (avg_surrounding - valley_price) / valley_price * 100
+    
+    def _analyze_current_trend(self, prices, peaks, valleys):
+        """현재 트렌드 분석"""
+        if len(peaks) == 0 and len(valleys) == 0:
+            return 'sideways'
+        
+        recent_price = prices[-1]
+        recent_prices = prices[-10:]
+        
+        # 최근 추세 계산
+        if len(recent_prices) >= 10:
+            slope = np.polyfit(range(len(recent_prices)), recent_prices, 1)[0]
+            price_range = max(recent_prices) - min(recent_prices)
+            avg_price = np.mean(recent_prices)
+            
+            # 기울기를 가격 대비 퍼센트로 변환
+            slope_percent = (slope * len(recent_prices)) / avg_price * 100
+            
+            if slope_percent > 1.0 and price_range / avg_price > 0.02:
+                return 'uptrend'
+            elif slope_percent < -1.0 and price_range / avg_price > 0.02:
+                return 'downtrend'
+            else:
+                return 'sideways'
+        
+        return 'unknown'
+    
+    def _calculate_trend_strength(self, prices):
+        """트렌드 강도 계산 (0-100)"""
+        if len(prices) < 5:
+            return 0
+        
+        # 선형 회귀로 기울기 계산
+        x = np.arange(len(prices))
+        slope, _ = np.polyfit(x, prices, 1)
+        
+        # R-squared 계산 (추세의 일관성)
+        y_pred = slope * x + np.mean(prices)
+        r_squared = 1 - np.sum((prices - y_pred) ** 2) / np.sum((prices - np.mean(prices)) ** 2)
+        
+        # 변동성 대비 기울기 강도
+        volatility = np.std(prices) / np.mean(prices)
+        trend_strength = min(abs(slope) / np.mean(prices) / volatility * 100, 100)
+        
+        return trend_strength * r_squared
+    
+    def predict_reversal_probability(self, ticker, current_price, market_data=None):
+        """추세 반전 확률 예측"""
+        try:
+            if market_data is None:
+                df = data_manager.get_ohlcv(ticker, interval="minute30", count=100)
+                if df is None or len(df) < 50:
+                    return 0.0
+            else:
+                df = market_data
+            
+            closes = df['close'].values
+            highs = df['high'].values
+            lows = df['low'].values
+            volumes = df['volume'].values
+            
+            # 파동 분석
+            wave_analysis = self.detect_peaks_valleys(closes, window=3, min_change_percent=0.3)
+            
+            reversal_signals = 0
+            total_signals = 0
+            
+            # 1. RSI 과매수/과매도
+            rsi = self.calculate_rsi(closes, 14)
+            if rsi is not None:
+                total_signals += 1
+                if rsi > 75 or rsi < 25:  # 극단적 RSI
+                    reversal_signals += 2
+                elif rsi > 70 or rsi < 30:  # 과매수/과매도
+                    reversal_signals += 1
+            
+            # 2. 볼린저 밴드 이탈
+            upper, middle, lower = self.calculate_bollinger_bands(closes, 20, 2)
+            if upper is not None and lower is not None:
+                total_signals += 1
+                if current_price > upper * 1.01:  # 상단 돌파 후 반전 가능성
+                    reversal_signals += 1
+                elif current_price < lower * 0.99:  # 하단 이탈 후 반전 가능성
+                    reversal_signals += 1
+            
+            # 3. MACD 다이버전스
+            macd, signal, histogram = self.calculate_macd(closes)
+            if macd is not None and signal is not None:
+                total_signals += 1
+                if abs(histogram) > abs(self.calculate_macd(closes[:-5])[2] or 0):
+                    reversal_signals += 1
+            
+            # 4. 거래량 급증
+            recent_volume = np.mean(volumes[-3:])
+            avg_volume = np.mean(volumes[-20:-3])
+            if avg_volume > 0:
+                total_signals += 1
+                volume_ratio = recent_volume / avg_volume
+                if volume_ratio > 2.0:  # 거래량 2배 이상 급증
+                    reversal_signals += 1
+            
+            # 5. 파동 분석 기반 반전 신호
+            if wave_analysis['current_trend'] != 'unknown':
+                total_signals += 2
+                trend_strength = wave_analysis['trend_strength']
+                
+                # 강한 트렌드 후 반전 가능성
+                if trend_strength > 70:
+                    reversal_signals += 2
+                elif trend_strength > 50:
+                    reversal_signals += 1
+                
+                # 최근 고점/저점 근처에서 반전 확률 증가
+                peaks = wave_analysis['peaks']
+                valleys = wave_analysis['valleys']
+                
+                for peak in peaks[-2:]:
+                    if abs(current_price - peak['price']) / peak['price'] < 0.01:  # 1% 이내
+                        reversal_signals += 1
+                        
+                for valley in valleys[-2:]:
+                    if abs(current_price - valley['price']) / valley['price'] < 0.01:  # 1% 이내
+                        reversal_signals += 1
+            
+            # 반전 확률 계산 (0-1)
+            if total_signals > 0:
+                reversal_probability = min(reversal_signals / (total_signals * 2), 1.0)
+            else:
+                reversal_probability = 0.0
+            
+            return reversal_probability
+            
+        except Exception as e:
+            print(f"⚠️ 추세 반전 예측 오류 ({ticker}): {e}")
+            return 0.0
+    
     def get_comprehensive_signals(self, ticker, current_price, market_data=None):
         """종합적인 매수/매도 신호 분석"""
         try:
@@ -3406,6 +3597,268 @@ class AdvancedTechnicalAnalyzer:
 technical_analyzer = AdvancedTechnicalAnalyzer()
 
 # 고도화된 리스크 관리 시스템
+class WaveBasedTradingSystem:
+    """파동 기반 최고점/최저점 매수/매도 시스템"""
+    
+    def __init__(self, ticker, initial_balance):
+        self.ticker = ticker
+        self.initial_balance = initial_balance
+        self.positions = []  # 현재 보유 포지션
+        self.technical_analyzer = AdvancedTechnicalAnalyzer()
+        self.buy_history = []  # 매수 이력
+        self.sell_history = []  # 매도 이력
+        self.emergency_stop_threshold = -0.03  # -3% 급락시 강제 매도
+        self.fee_rate = 0.0005
+        
+    def analyze_wave_signals(self, market_data):
+        """파동 분석을 통한 매수/매도 신호 생성"""
+        try:
+            closes = market_data['close'].values
+            highs = market_data['high'].values
+            lows = market_data['low'].values
+            volumes = market_data['volume'].values
+            current_price = closes[-1]
+            
+            # 파동 분석
+            wave_analysis = self.technical_analyzer.detect_peaks_valleys(closes, window=3, min_change_percent=0.3)
+            reversal_prob = self.technical_analyzer.predict_reversal_probability(self.ticker, current_price, market_data)
+            
+            # RSI 추가 분석
+            rsi = self.technical_analyzer.calculate_rsi(closes, 14)
+            
+            # 볼린저 밴드 분석
+            upper_band, middle_band, lower_band = self.technical_analyzer.calculate_bollinger_bands(closes, 20, 2)
+            
+            # MACD 분석
+            macd, signal_line, histogram = self.technical_analyzer.calculate_macd(closes)
+            
+            signals = {
+                'action': 'hold',
+                'strength': 0,
+                'reason': '',
+                'wave_data': wave_analysis,
+                'reversal_probability': reversal_prob,
+                'technical_indicators': {
+                    'rsi': rsi,
+                    'bollinger': {'upper': upper_band, 'middle': middle_band, 'lower': lower_band},
+                    'macd': {'macd': macd, 'signal': signal_line, 'histogram': histogram}
+                }
+            }
+            
+            # 매수 신호 감지
+            buy_signals = self._detect_buy_signals(current_price, wave_analysis, reversal_prob, rsi, 
+                                                   upper_band, middle_band, lower_band, macd, signal_line)
+            
+            # 매도 신호 감지
+            sell_signals = self._detect_sell_signals(current_price, wave_analysis, reversal_prob, rsi, 
+                                                    upper_band, middle_band, lower_band, macd, signal_line)
+            
+            if buy_signals['score'] > sell_signals['score']:
+                signals['action'] = 'buy'
+                signals['strength'] = buy_signals['score']
+                signals['reason'] = buy_signals['reason']
+            elif sell_signals['score'] > buy_signals['score']:
+                signals['action'] = 'sell'
+                signals['strength'] = sell_signals['score']
+                signals['reason'] = sell_signals['reason']
+            
+            return signals
+            
+        except Exception as e:
+            print(f"⚠️ 파동 신호 분석 오류 ({self.ticker}): {e}")
+            return {'action': 'hold', 'strength': 0, 'reason': 'analysis_error'}
+    
+    def _detect_buy_signals(self, current_price, wave_analysis, reversal_prob, rsi, upper_band, middle_band, lower_band, macd, signal_line):
+        """매수 신호 감지"""
+        score = 0
+        reasons = []
+        
+        # 1. 저점 근처에서 반전 신호
+        valleys = wave_analysis.get('valleys', [])
+        if len(valleys) > 0:
+            latest_valley = valleys[-1]
+            price_diff = (current_price - latest_valley['price']) / latest_valley['price']
+            
+            if -0.02 <= price_diff <= 0.005:  # 최근 저점 대비 -2% ~ +0.5% 범위
+                score += 30
+                reasons.append(f"저점 근처 ({price_diff*100:.1f}%)")
+                
+                # 저점에서 반등 신호가 강할 때 추가 점수
+                if reversal_prob > 0.6:
+                    score += 20
+                    reasons.append(f"강한 반전 신호 ({reversal_prob:.1f})")
+        
+        # 2. RSI 과매도 구간
+        if rsi is not None:
+            if rsi < 25:  # 극도 과매도
+                score += 25
+                reasons.append(f"극도 과매도 (RSI:{rsi:.1f})")
+            elif rsi < 30:  # 과매도
+                score += 15
+                reasons.append(f"과매도 (RSI:{rsi:.1f})")
+        
+        # 3. 볼린저 밴드 하단 근처
+        if lower_band is not None:
+            if current_price <= lower_band * 1.01:  # 하단 1% 이내
+                score += 20
+                reasons.append("볼린저 하단 근처")
+        
+        # 4. MACD 골든크로스
+        if macd is not None and signal_line is not None:
+            if macd > signal_line and len(self.buy_history) > 0:
+                # 이전 데이터와 비교하여 골든크로스 확인
+                score += 15
+                reasons.append("MACD 골든크로스")
+        
+        # 5. 하락 추세에서 반전 조짐
+        if wave_analysis.get('current_trend') == 'downtrend' and reversal_prob > 0.5:
+            score += 15
+            reasons.append("하락 추세 반전 조짐")
+        
+        return {'score': score, 'reason': ', '.join(reasons)}
+    
+    def _detect_sell_signals(self, current_price, wave_analysis, reversal_prob, rsi, upper_band, middle_band, lower_band, macd, signal_line):
+        """매도 신호 감지"""
+        score = 0
+        reasons = []
+        
+        # 1. 고점 근처에서 반전 신호
+        peaks = wave_analysis.get('peaks', [])
+        if len(peaks) > 0:
+            latest_peak = peaks[-1]
+            price_diff = (current_price - latest_peak['price']) / latest_peak['price']
+            
+            if -0.005 <= price_diff <= 0.02:  # 최근 고점 대비 -0.5% ~ +2% 범위
+                score += 30
+                reasons.append(f"고점 근처 ({price_diff*100:.1f}%)")
+                
+                # 고점에서 반전 신호가 강할 때 추가 점수
+                if reversal_prob > 0.6:
+                    score += 20
+                    reasons.append(f"강한 반전 신호 ({reversal_prob:.1f})")
+        
+        # 2. RSI 과매수 구간
+        if rsi is not None:
+            if rsi > 75:  # 극도 과매수
+                score += 25
+                reasons.append(f"극도 과매수 (RSI:{rsi:.1f})")
+            elif rsi > 70:  # 과매수
+                score += 15
+                reasons.append(f"과매수 (RSI:{rsi:.1f})")
+        
+        # 3. 볼린저 밴드 상단 근처
+        if upper_band is not None:
+            if current_price >= upper_band * 0.99:  # 상단 1% 이내
+                score += 20
+                reasons.append("볼린저 상단 근처")
+        
+        # 4. MACD 데드크로스
+        if macd is not None and signal_line is not None:
+            if macd < signal_line and len(self.sell_history) > 0:
+                # 이전 데이터와 비교하여 데드크로스 확인
+                score += 15
+                reasons.append("MACD 데드크로스")
+        
+        # 5. 상승 추세에서 반전 조짐
+        if wave_analysis.get('current_trend') == 'uptrend' and reversal_prob > 0.5:
+            score += 15
+            reasons.append("상승 추세 반전 조짐")
+        
+        return {'score': score, 'reason': ', '.join(reasons)}
+    
+    def calculate_position_profit(self, position, current_price):
+        """포지션 수익률 계산 (수수료 포함)"""
+        buy_value = position['quantity'] * position['buy_price']
+        current_value = position['quantity'] * current_price
+        
+        # 매수 수수료
+        buy_fee = buy_value * self.fee_rate
+        # 매도시 예상 수수료
+        sell_fee = current_value * self.fee_rate
+        
+        # 순 수익 (수수료 제외)
+        net_profit = current_value - buy_value - buy_fee - sell_fee
+        profit_percent = (net_profit / (buy_value + buy_fee)) * 100
+        
+        return {
+            'net_profit': net_profit,
+            'profit_percent': profit_percent,
+            'buy_value': buy_value,
+            'current_value': current_value,
+            'total_fees': buy_fee + sell_fee
+        }
+    
+    def check_emergency_stop_loss(self, current_price):
+        """-3% 급락시 강제 매도 체크"""
+        emergency_sells = []
+        
+        for position in self.positions:
+            profit_info = self.calculate_position_profit(position, current_price)
+            
+            # -3% 이하로 떨어지면 강제 매도
+            if profit_info['profit_percent'] <= self.emergency_stop_threshold * 100:
+                emergency_sells.append({
+                    'position': position,
+                    'reason': f"급락 손절 ({profit_info['profit_percent']:.1f}%)",
+                    'profit_info': profit_info
+                })
+                print(f"🚨 {self.ticker} 급락 감지: {profit_info['profit_percent']:.1f}% 손실 - 강제 매도")
+        
+        return emergency_sells
+    
+    def should_progressive_buy(self, current_price, signals):
+        """추가 매수 조건 확인"""
+        if not self.positions:
+            return False
+        
+        # 평균 매수가 계산
+        total_quantity = sum(pos['quantity'] for pos in self.positions)
+        total_value = sum(pos['quantity'] * pos['buy_price'] for pos in self.positions)
+        avg_buy_price = total_value / total_quantity if total_quantity > 0 else 0
+        
+        # 현재가가 평균 매수가보다 2% 이상 낮고, 매수 신호가 강할 때
+        price_drop = (avg_buy_price - current_price) / avg_buy_price
+        
+        if price_drop >= 0.02 and signals['strength'] > 40:
+            return {
+                'should_buy': True,
+                'reason': f"추가 매수 (평균가 대비 -{price_drop*100:.1f}%, 신호강도: {signals['strength']})",
+                'avg_buy_price': avg_buy_price,
+                'price_drop_percent': price_drop * 100
+            }
+        
+        return {'should_buy': False, 'reason': 'no_progressive_buy_signal'}
+    
+    def should_progressive_sell(self, current_price, signals):
+        """추가 매도 조건 확인"""
+        if not self.positions:
+            return {'should_sell': False, 'reason': 'no_positions'}
+        
+        profitable_positions = []
+        
+        for position in self.positions:
+            profit_info = self.calculate_position_profit(position, current_price)
+            
+            # 수수료를 제외하고도 수익이 나는 포지션만
+            if profit_info['net_profit'] > 0:
+                profitable_positions.append({
+                    'position': position,
+                    'profit_info': profit_info
+                })
+        
+        if profitable_positions and signals['strength'] > 30:
+            # 가장 수익이 높은 포지션부터 매도
+            profitable_positions.sort(key=lambda x: x['profit_info']['profit_percent'], reverse=True)
+            
+            return {
+                'should_sell': True,
+                'positions_to_sell': profitable_positions,
+                'reason': f"수익 실현 (최고 수익: {profitable_positions[0]['profit_info']['profit_percent']:.1f}%)",
+                'sell_signal_strength': signals['strength']
+            }
+        
+        return {'should_sell': False, 'reason': 'no_profitable_positions_or_weak_signal'}
+
 class AdvancedRiskManager:
     """고도화된 리스크 관리 및 손절 시스템"""
     
@@ -6561,6 +7014,28 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     except:
         pass
     
+    # 🌊 파동 기반 거래 시스템 초기화
+    wave_trading_system = WaveBasedTradingSystem(ticker, total_investment)
+    print(f"🌊 {ticker} 파동 기반 거래 시스템 활성화")
+    print(f"   - 최고점/최저점 감지 알고리즘 적용")
+    print(f"   - 수익 기반 추가 매수/매도 시스템")
+    print(f"   - -3% 급락시 자동 손절 시스템")
+    
+    # 시장 데이터 수집 함수
+    def get_market_data_for_analysis():
+        """파동 분석을 위한 시장 데이터 수집"""
+        try:
+            df = data_manager.get_ohlcv(ticker, interval="minute30", count=100)
+            if df is not None and len(df) >= 50:
+                return df
+            else:
+                # 백업: 더 짧은 데이터라도 수집
+                df_backup = data_manager.get_ohlcv(ticker, interval="minute15", count=80)
+                return df_backup
+        except Exception as e:
+            print(f"⚠️ 시장 데이터 수집 오류 ({ticker}): {e}")
+            return None
+    
     is_valid, error_msg = check_api_data_validity(current_price, orderbook)
     if not is_valid:
         log_and_update('오류', f'API 데이터 오류: {error_msg}')
@@ -7130,6 +7605,57 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             if len(recent_prices) > 20:
                 recent_prices = recent_prices[-15:]  # 더 효율적인 슬라이싱
             
+            # 🌊 파동 기반 거래 분석 (매 30초마다)
+            wave_analysis_signals = None
+            if len(recent_prices) >= 10:  # 최소 데이터 확보시에만
+                try:
+                    market_data = get_market_data_for_analysis()
+                    if market_data is not None:
+                        wave_analysis_signals = wave_trading_system.analyze_wave_signals(market_data)
+                        
+                        # 포지션 정보 업데이트 (데모 모드)
+                        wave_trading_system.positions = []
+                        for pos in demo_positions:
+                            wave_trading_system.positions.append({
+                                'quantity': pos['quantity'],
+                                'buy_price': pos['buy_price'],
+                                'timestamp': pos.get('timestamp', datetime.now())
+                            })
+                        
+                        # 급락시 -3% 강제 매도 체크
+                        emergency_sells = wave_trading_system.check_emergency_stop_loss(price)
+                        
+                        if emergency_sells:
+                            for emergency_sell in emergency_sells:
+                                pos_to_sell = emergency_sell['position']
+                                profit_info = emergency_sell['profit_info']
+                                
+                                print(f"🚨 {ticker} 급락 손절: {profit_info['profit_percent']:.1f}% 손실")
+                                
+                                # 강제 매도 실행
+                                if demo_mode:
+                                    sell_value = pos_to_sell['quantity'] * price
+                                    demo_balance += sell_value * (1 - fee_rate)
+                                    demo_positions = [pos for pos in demo_positions if pos != pos_to_sell]
+                                else:
+                                    # 실거래 강제 매도 (여기서는 데모로 처리)
+                                    pass
+                                
+                                log_and_update('급락매도', f"{price:,.0f}원 손절: {profit_info['profit_percent']:.1f}%")
+                                speak_async(f"{get_korean_coin_name(ticker)} 급락 손절 실행")
+                        
+                        # 파동 신호 출력 (강한 신호만)
+                        if wave_analysis_signals and wave_analysis_signals['strength'] > 40:
+                            signal_action = wave_analysis_signals['action']
+                            signal_strength = wave_analysis_signals['strength']
+                            signal_reason = wave_analysis_signals['reason']
+                            
+                            print(f"🌊 {ticker} 파동 신호: {signal_action.upper()} (강도: {signal_strength}, 이유: {signal_reason})")
+                            
+                except Exception as e:
+                    print(f"⚠️ 파동 분석 오류 ({ticker}): {e}")
+                    wave_analysis_signals = None
+            
             # 동적 그리드 범위 이탈 감지 및 재설정 (자동 거래 모드일 때만)
             if config.get('enable_dynamic_grid_reset', True) and config.get('auto_trading_mode', False):
                 try:
@@ -7435,6 +7961,45 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             # 데모 모드도 통합 거래 로직 사용
             current_time = datetime.now()
             buy_action = trading_logic.check_buy_conditions(price, prev_price, demo_balance, demo_positions, current_time)
+            
+            # 🌊 파동 기반 추가 매수/매도 로직 통합
+            if wave_analysis_signals and wave_analysis_signals['strength'] > 30:
+                # 파동 신호에 따른 추가 매수 체크
+                progressive_buy_check = wave_trading_system.should_progressive_buy(price, wave_analysis_signals)
+                if progressive_buy_check.get('should_buy', False):
+                    # 기존 그리드 매수가 없어도 파동 신호로 매수
+                    if not buy_action['should_buy']:
+                        print(f"🌊 {ticker} 파동 기반 추가 매수 신호: {progressive_buy_check['reason']}")
+                        buy_action['should_buy'] = True
+                        buy_action['reason'] = f"파동추가매수: {progressive_buy_check['reason']}"
+                        buy_action['buy_price'] = price
+                        buy_action['quantity'] = min(amount_per_grid / price, demo_balance / price * 0.8) if demo_balance > amount_per_grid else 0
+                
+                # 파동 신호에 따른 추가 매도 체크
+                progressive_sell_check = wave_trading_system.should_progressive_sell(price, wave_analysis_signals)
+                if progressive_sell_check.get('should_sell', False):
+                    positions_to_sell = progressive_sell_check['positions_to_sell']
+                    print(f"🌊 {ticker} 파동 기반 매도 신호: {progressive_sell_check['reason']}")
+                    
+                    # 수익이 나는 포지션들을 파동 신호에 따라 매도
+                    for sell_info in positions_to_sell[:2]:  # 최대 2개 포지션만 매도
+                        pos_to_sell = sell_info['position']
+                        profit_info = sell_info['profit_info']
+                        
+                        if profit_info['net_profit'] > 0:  # 수수료 제외하고도 수익
+                            print(f"🌊 파동 매도: {profit_info['profit_percent']:.2f}% 수익 실현")
+                            
+                            # 데모 매도 실행
+                            sell_value = pos_to_sell['quantity'] * price
+                            demo_balance += sell_value * (1 - fee_rate)
+                            
+                            # 해당 포지션을 demo_positions에서 제거
+                            demo_positions = [pos for pos in demo_positions 
+                                            if not (pos['buy_price'] == pos_to_sell['buy_price'] and 
+                                                   pos['quantity'] == pos_to_sell['quantity'])]
+                            
+                            log_and_update('파동매도', f"{price:,.0f}원 수익: {profit_info['profit_percent']:.2f}%")
+                            speak_async(f"{get_korean_coin_name(ticker)} 파동 매도 완료")
             
             # 매수 상태 변경 처리
             if buy_action['state_changed']:
@@ -7841,6 +8406,51 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             # 실거래 매수 로직 (데모 모드와 동일한 통합 로직 사용)
             buy_action = trading_logic.check_buy_conditions(price, prev_price, demo_balance, demo_positions, current_time)
+            
+            # 🌊 파동 기반 추가 매수/매도 로직 통합 (실거래 모드)
+            if wave_analysis_signals and wave_analysis_signals['strength'] > 30:
+                # 파동 신호에 따른 추가 매수 체크
+                progressive_buy_check = wave_trading_system.should_progressive_buy(price, wave_analysis_signals)
+                if progressive_buy_check.get('should_buy', False):
+                    # 기존 그리드 매수가 없어도 파동 신호로 매수
+                    if not buy_action['should_buy']:
+                        print(f"🌊 {ticker} 실거래 파동 기반 추가 매수 신호: {progressive_buy_check['reason']}")
+                        buy_action['should_buy'] = True
+                        buy_action['reason'] = f"파동추가매수: {progressive_buy_check['reason']}"
+                        buy_action['buy_price'] = price
+                        buy_action['quantity'] = min(amount_per_grid / price, demo_balance / price * 0.8) if demo_balance > amount_per_grid else 0
+                
+                # 파동 신호에 따른 추가 매도 체크 (실거래)
+                progressive_sell_check = wave_trading_system.should_progressive_sell(price, wave_analysis_signals)
+                if progressive_sell_check.get('should_sell', False):
+                    positions_to_sell = progressive_sell_check['positions_to_sell']
+                    print(f"🌊 {ticker} 실거래 파동 기반 매도 신호: {progressive_sell_check['reason']}")
+                    
+                    # 수익이 나는 포지션들을 파동 신호에 따라 실제 매도
+                    for sell_info in positions_to_sell[:2]:  # 최대 2개 포지션만 매도
+                        pos_to_sell = sell_info['position']
+                        profit_info = sell_info['profit_info']
+                        
+                        if profit_info['net_profit'] > 0:  # 수수료 제외하고도 수익
+                            print(f"🌊 실거래 파동 매도: {profit_info['profit_percent']:.2f}% 수익 실현")
+                            
+                            try:
+                                # 실제 매도 주문 실행
+                                sell_result = upbit.sell_market_order(ticker, pos_to_sell['quantity'])
+                                if sell_result:
+                                    print(f"✅ 실거래 파동 매도 성공: {pos_to_sell['quantity']:.6f}개")
+                                    
+                                    # 데모 포지션에서도 제거 (동기화)
+                                    demo_positions = [pos for pos in demo_positions 
+                                                    if not (pos['buy_price'] == pos_to_sell['buy_price'] and 
+                                                           pos['quantity'] == pos_to_sell['quantity'])]
+                                    
+                                    log_and_update('파동매도', f"{price:,.0f}원 수익: {profit_info['profit_percent']:.2f}%")
+                                    speak_async(f"{get_korean_coin_name(ticker)} 파동 매도 완료")
+                                else:
+                                    print(f"❌ 실거래 파동 매도 실패")
+                            except Exception as e:
+                                print(f"❌ 실거래 파동 매도 오류: {e}")
             
             # 디버깅: 현재 상태 출력 (실거래 모드에서만)
             print(f"🔍 실거래 디버그 - {get_korean_coin_name(ticker)}: 현재가={price:,.0f}, 이전가={prev_price:,.0f}")

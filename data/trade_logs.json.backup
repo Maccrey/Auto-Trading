@@ -4238,6 +4238,302 @@
                 "prev_price": "4,087원",
                 "current_price": "4,086원"
             }
+        },
+        {
+            "time": "2025-09-08 20:15:38",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:17:16",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,088원",
+                "current_price": "4,085원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:17:18",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:17:25",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:17:27",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:17:35",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:17:36",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:18:39",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:18:41",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:18:51",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:18:53",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:18:58",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:19:00",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:25:57",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:25:59",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:26:04",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,085원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:26:06",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:33:13",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,088원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:33:15",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:33:32",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,087원",
+                "prev_price": "4,087원",
+                "current_price": "4,086원"
+            }
+        },
+        {
+            "time": "2025-09-08 20:33:34",
+            "action": "매수 취소",
+            "price": "최소 주문 금액 미달: 5,631원",
+            "reason": "주문 금액 부족",
+            "details": {
+                "min_required": 6000
+            }
+        },
+        {
+            "time": "2025-09-08 20:46:46",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "XRP",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 21:46:50",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "XRP",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 22:46:55",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "XRP",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 23:15:00",
+            "action": "자동모드",
+            "price": "리스크 모드: 안정적, 투자비율: 50%"
+        },
+        {
+            "time": "2025-09-08 23:15:00",
+            "action": "자동계산",
+            "price": "최적 그리드 개수: 25개"
+        },
+        {
+            "time": "2025-09-08 23:15:00",
+            "action": "시작",
+            "price": "4.0시간 범위: 3,994~4,250"
+        },
+        {
+            "time": "2025-09-08 23:15:01",
+            "action": "투자금분배",
+            "price": "총 가용자금: 422,294원 중 140,765원 (33.3%) 분배"
+        },
+        {
+            "time": "2025-09-08 23:15:01",
+            "action": "설정",
+            "price": "그리드 간격: 10원, 격당투자: 5,631원"
+        },
+        {
+            "time": "2025-09-08 23:15:01",
+            "action": "실거래 매수보류",
+            "price": "매수 그리드 도달. 매수 보류 시작.",
+            "reason": "그리드 레벨 도달",
+            "details": {
+                "grid_price": "4,158원",
+                "prev_price": "4,236원",
+                "current_price": "4,153원"
+            }
         }
     ],
     "KRW-BTC": [
@@ -4339,6 +4635,57 @@
                 "change_percent": "+660.8%",
                 "total_available": "422,294원",
                 "significance": "미미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 20:46:46",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "BTC",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 21:46:50",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "BTC",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 22:46:55",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "BTC",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
                 "trigger": "1시간 자동 리밸런싱",
                 "analysis_type": "지능형 분석"
             }
@@ -4446,6 +4793,57 @@
                 "trigger": "1시간 자동 리밸런싱",
                 "analysis_type": "지능형 분석"
             }
+        },
+        {
+            "time": "2025-09-08 20:46:46",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "ETH",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 21:46:50",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "ETH",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
+        },
+        {
+            "time": "2025-09-08 22:46:55",
+            "action": "재분배",
+            "price": "0원 → 140,765원 (+140,765원)",
+            "reason": "지능형 분석 결과 유의미한 변화 - 33.3% 조정",
+            "details": {
+                "coin_name": "ETH",
+                "old_allocation": "0원",
+                "new_allocation": "140,765원",
+                "change_amount": "+140,765원",
+                "change_percent": "+140764.8%",
+                "total_available": "422,294원",
+                "significance": "유의미한 변화",
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_type": "지능형 분석"
+            }
         }
     ],
     "SYSTEM": [
@@ -4532,6 +4930,51 @@
                 "significant_changes": false,
                 "reason": "모든 코인의 변화율이 5% 미만"
             }
+        },
+        {
+            "time": "2025-09-08 20:46:46",
+            "action": "재분배완료",
+            "price": "총 422,294원 재분배",
+            "reason": "지능형 분석으로 3개 코인 재분배 완료",
+            "details": {
+                "total_available": "422,294원",
+                "total_allocated": "422,294원",
+                "spare_funds": "-0원",
+                "rebalanced_coins": 3,
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_method": "지능형 분석",
+                "significant_changes": true
+            }
+        },
+        {
+            "time": "2025-09-08 21:46:50",
+            "action": "재분배완료",
+            "price": "총 422,294원 재분배",
+            "reason": "지능형 분석으로 3개 코인 재분배 완료",
+            "details": {
+                "total_available": "422,294원",
+                "total_allocated": "422,294원",
+                "spare_funds": "-0원",
+                "rebalanced_coins": 3,
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_method": "지능형 분석",
+                "significant_changes": true
+            }
+        },
+        {
+            "time": "2025-09-08 22:46:56",
+            "action": "재분배완료",
+            "price": "총 422,294원 재분배",
+            "reason": "지능형 분석으로 3개 코인 재분배 완료",
+            "details": {
+                "total_available": "422,294원",
+                "total_allocated": "422,294원",
+                "spare_funds": "-0원",
+                "rebalanced_coins": 3,
+                "trigger": "1시간 자동 리밸런싱",
+                "analysis_method": "지능형 분석",
+                "significant_changes": true
+            }
         }
     ],
     "AUTO_SYSTEM": [
@@ -4607,6 +5050,45 @@
             "reason": "60분 주기로 시간대와 그리드 설정이 자동 업데이트됨",
             "details": {
                 "update_time": "2025-09-08T13:26:41.756509",
+                "interval_minutes": 60,
+                "interval_cycles": 1,
+                "counter": 1,
+                "trigger": "60분 자동 업데이트"
+            }
+        },
+        {
+            "time": "2025-09-08 20:46:47",
+            "action": "자동업데이트",
+            "price": "최적 설정 업데이트 완료",
+            "reason": "60분 주기로 시간대와 그리드 설정이 자동 업데이트됨",
+            "details": {
+                "update_time": "2025-09-08T20:46:47.686621",
+                "interval_minutes": 60,
+                "interval_cycles": 1,
+                "counter": 1,
+                "trigger": "60분 자동 업데이트"
+            }
+        },
+        {
+            "time": "2025-09-08 21:46:51",
+            "action": "자동업데이트",
+            "price": "최적 설정 업데이트 완료",
+            "reason": "60분 주기로 시간대와 그리드 설정이 자동 업데이트됨",
+            "details": {
+                "update_time": "2025-09-08T21:46:51.880478",
+                "interval_minutes": 60,
+                "interval_cycles": 1,
+                "counter": 1,
+                "trigger": "60분 자동 업데이트"
+            }
+        },
+        {
+            "time": "2025-09-08 22:46:57",
+            "action": "자동업데이트",
+            "price": "최적 설정 업데이트 완료",
+            "reason": "60분 주기로 시간대와 그리드 설정이 자동 업데이트됨",
+            "details": {
+                "update_time": "2025-09-08T22:46:57.620801",
                 "interval_minutes": 60,
                 "interval_cycles": 1,
                 "counter": 1,
