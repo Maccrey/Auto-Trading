@@ -188,28 +188,64 @@ class ErrorMonitor:
 # 전역 오류 모니터 인스턴스
 error_monitor = ErrorMonitor()
 
-# TTS 엔진 초기화
+# TTS 엔진 초기화 (Windows 호환성 강화)
 try:
-    tts_engine = pyttsx3.init()
-    # 말하기 속도 조절 (기본값: 200)
-    rate = tts_engine.getProperty('rate')
-    tts_engine.setProperty('rate', 150)  # 150으로 설정 (보통 속도)
+    # Windows에서 TTS 드라이버 설정
+    import platform
+    if platform.system() == 'Windows':
+        try:
+            # Windows SAPI 드라이버 사용 시도
+            tts_engine = pyttsx3.init(driverName='sapi5')
+        except:
+            try:
+                # 기본 드라이버 시도
+                tts_engine = pyttsx3.init()
+            except:
+                print("⚠️ Windows TTS 드라이버 초기화 실패 - TTS 기능 비활성화")
+                tts_engine = None
+    else:
+        tts_engine = pyttsx3.init()
     
-    tts_queue = Queue(maxsize=100)  # 큐 크기 제한으로 메모리 보호
-    tts_lock = threading.Lock()
-    tts_worker_thread = None
-    
-    # TTS 경고 중복 방지를 위한 변수
-    last_alert_time = {}  # 각 코인별 마지막 경고 시간
-    alert_cooldown = 60   # 경고 쿨다운 시간 (초)
+    if tts_engine:
+        # 말하기 속도 조절 (기본값: 200)
+        try:
+            rate = tts_engine.getProperty('rate')
+            tts_engine.setProperty('rate', 150)  # 150으로 설정 (보통 속도)
+        except Exception as rate_error:
+            print(f"⚠️ TTS 속도 설정 실패 (기본값 사용): {rate_error}")
+        
+        tts_queue = Queue(maxsize=100)  # 큐 크기 제한으로 메모리 보호
+        tts_lock = threading.Lock()
+        tts_worker_thread = None
+        
+        # TTS 경고 중복 방지를 위한 변수
+        last_alert_time = {}  # 각 코인별 마지막 경고 시간
+        alert_cooldown = 60   # 경고 쿨다운 시간 (초)
+    else:
+        tts_queue = None
+        tts_lock = None
+        tts_worker_thread = None
+        last_alert_time = {}
+        alert_cooldown = 60
     
 except (ImportError, RuntimeError, OSError) as e:
     print(f"⚠️ TTS 엔진 초기화 실패: {type(e).__name__} - {e}")
     print("📝 TTS 기능이 비활성화됩니다. 거래 기능은 정상 작동합니다.")
     tts_engine = None
+    tts_queue = None
+    tts_lock = None
+    tts_worker_thread = None
+    last_alert_time = {}
+    alert_cooldown = 60
 except Exception as e:
     print(f"❌ TTS 엔진 예상치 못한 오류: {type(e).__name__} - {e}")
+    print("📝 Windows에서 TTS 문제가 발생했습니다. TTS 없이 계속 진행합니다.")
     tts_engine = None
+    tts_queue = None
+    tts_lock = None
+    tts_worker_thread = None
+    last_alert_time = {}
+    alert_cooldown = 60
 
 # 중앙집중식 API 데이터 관리 시스템
 class CentralizedDataManager:
@@ -926,11 +962,32 @@ class CoinSpecificGridManager:
             coin_name = get_korean_coin_name(ticker)
             print(f"⚙️ {coin_name} 그리드 계산 - 자동모드: {auto_mode}")
             
-            # 자동 모드에서는 설정된 그리드 수 사용 (최적화는 별도 스케줄러에서 처리)
+            # 자동 모드에서는 최소 주문 금액을 고려한 그리드 수 계산
             if auto_mode:
+                # 투자금 계산 (실거래 모드에서 실제 사용 가능한 금액)
+                if total_investment and total_investment > 0:
+                    available_investment = total_investment
+                else:
+                    # 전체 투자금의 일부를 할당 (예: 50%)
+                    total_config_investment = config.get('total_investment', 1000000)
+                    available_investment = total_config_investment * 0.5  # 50% 할당
+                
+                # 최소 주문 금액 고려하여 그리드 수 계산
+                min_order_amount = config.get('min_order_amount', 6000)
+                safety_margin = 1.2  # 20% 안전 마진
+                min_amount_per_grid = min_order_amount * safety_margin
+                
+                max_grids_by_min_order = int(available_investment / min_amount_per_grid)
+                
+                # 기본 설정과 비교하여 최종 결정
                 coin_config = self.coin_profiles.get(ticker, self.coin_profiles["KRW-BTC"])
-                optimal_grid_count = coin_config.get('grid_count', 20)
-                print(f"⚙️ {coin_name} 자동 그리드: {optimal_grid_count}개")
+                default_grids = coin_config.get('grid_count', 20)
+                
+                # 더 작은 값 선택 (최소 주문 금액을 만족하도록)
+                optimal_grid_count = min(default_grids, max_grids_by_min_order, 25)  # 최대 25개로 제한
+                optimal_grid_count = max(5, optimal_grid_count)  # 최소 5개 보장
+                
+                print(f"⚙️ {coin_name} 자동 그리드: {optimal_grid_count}개 (투자금: {available_investment:,.0f}원, 그리드당: {available_investment/optimal_grid_count:,.0f}원)")
                 return optimal_grid_count
                 
             # 수동 모드에서는 기존 로직 사용
@@ -1142,6 +1199,101 @@ class CoinSpecificGridManager:
         except:
             return 0.5
     
+    def calculate_price_volatility(self, ticker, timeframe_hours=24):
+        """가격 변동성(진폭) 계산 - 매매 빈도 조정용"""
+        try:
+            # 변동성 계산을 위한 최근 24시간 데이터 수집
+            df = data_manager.get_ohlcv(ticker, interval='minute60', count=24)
+            if df is None or len(df) < 12:
+                return {'volatility': 0.05, 'amplitude': 0.03, 'trading_intensity': 'normal'}
+            
+            # 1. 변동성 계산 (ATR 방식)
+            high_low = df['high'] - df['low']
+            high_close = abs(df['high'] - df['close'].shift(1))
+            low_close = abs(df['low'] - df['close'].shift(1))
+            
+            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+            atr = true_range.rolling(window=12).mean().iloc[-1]
+            current_price = df['close'].iloc[-1]
+            atr_percentage = (atr / current_price) * 100 if current_price > 0 else 0
+            
+            # 2. 진폭 계산 (24시간 고저 차이)
+            price_range = df['high'].max() - df['low'].min()
+            amplitude = (price_range / current_price) * 100 if current_price > 0 else 0
+            
+            # 3. 거래 강도 결정
+            if amplitude >= 8.0:  # 8% 이상
+                trading_intensity = 'high'  # 고변동성
+            elif amplitude >= 4.0:  # 4-8%
+                trading_intensity = 'medium'  # 중변동성
+            else:  # 4% 미만
+                trading_intensity = 'low'  # 저변동성
+            
+            volatility_data = {
+                'volatility': min(atr_percentage, 15.0),  # ATR 방식 변동성 (15% 제한)
+                'amplitude': min(amplitude, 20.0),  # 진폭 (20% 제한)
+                'trading_intensity': trading_intensity,
+                'current_price': current_price
+            }
+            
+            print(f"📈 {ticker} 변동성 분석: ATR={atr_percentage:.2f}%, 진폭={amplitude:.2f}%, 강도={trading_intensity}")
+            return volatility_data
+            
+        except Exception as e:
+            print(f"⚠️ 변동성 계산 오류 ({ticker}): {e}")
+            return {'volatility': 0.05, 'amplitude': 0.03, 'trading_intensity': 'normal'}
+    
+    def get_dynamic_trading_params(self, ticker, volatility_data):
+        """변동성 기반 동적 매매 파라미터 설정"""
+        try:
+            volatility = volatility_data.get('volatility', 0.05)
+            amplitude = volatility_data.get('amplitude', 0.03)
+            intensity = volatility_data.get('trading_intensity', 'normal')
+            
+            # 기본 파라미터
+            base_params = {
+                'confirmation_buffer': 0.1,  # 기본 0.1%
+                'target_profit': 0.5,  # 기본 0.5%
+                'min_profit_for_trend_sell': 0.05,  # 기본 0.05%
+                'grid_spacing_multiplier': 1.0  # 기본 그리드 간격
+            }
+            
+            # 변동성에 따른 동적 조정 - 매매 빈도 최대화를 위한 적극적 조정
+            if intensity == 'high':  # 고변동성 (8%+) - 매매 빈도 극대화
+                params = {
+                    'confirmation_buffer': max(0.01, volatility * 0.1),  # 0.01% ~ 1.5% (대폭 낮춤)
+                    'target_profit': max(0.05, amplitude * 0.03),  # 0.05% ~ 0.6% (매우 낮춤)
+                    'min_profit_for_trend_sell': 0.005,  # 0.5%만으로도 매도 허용
+                    'grid_spacing_multiplier': 0.3  # 그리드 간격 30%로 대폭 축소
+                }
+            elif intensity == 'medium':  # 중변동성 (4-8%) - 매매 빈도 크게 증가
+                params = {
+                    'confirmation_buffer': max(0.02, volatility * 0.15),  # 0.02% ~ 2.25% (대폭 낮춤)
+                    'target_profit': max(0.08, amplitude * 0.05),  # 0.08% ~ 1.0% (대폭 낮춤)
+                    'min_profit_for_trend_sell': 0.01,  # 1%만으로도 매도 허용
+                    'grid_spacing_multiplier': 0.5  # 그리드 간격 50%로 축소
+                }
+            else:  # 저변동성 (4% 미만) - 적극적으로 변경
+                params = {
+                    'confirmation_buffer': max(0.03, volatility * 0.2),  # 0.03% ~ 3.0% (낮춤)
+                    'target_profit': max(0.12, amplitude * 0.08),  # 0.12% ~ 1.6% (낮춤)
+                    'min_profit_for_trend_sell': 0.02,  # 2%만으로도 매도 허용
+                    'grid_spacing_multiplier': 0.7  # 그리드 간격 70%로 축소
+                }
+            
+            # 최대/최소 제한 설정
+            params['confirmation_buffer'] = min(params['confirmation_buffer'], 0.5)  # 최대 0.5%
+            params['target_profit'] = min(params['target_profit'], 2.0)  # 최대 2.0%
+            params['min_profit_for_trend_sell'] = max(params['min_profit_for_trend_sell'], 0.01)  # 최소 0.01%
+            
+            print(f"🎯 {ticker} 동적 매매 파라미터: 확인버퍼={params['confirmation_buffer']:.3f}%, 목표수익={params['target_profit']:.3f}%, 최소수익={params['min_profit_for_trend_sell']:.3f}% (변동성 상태: {volatility_data['trading_intensity']})")
+            print(f"📈 {ticker} 매매 빈도 최적화: ATR={volatility_data['volatility']:.2f}%, 진폭={volatility_data['amplitude']:.2f}%")
+            return params
+            
+        except Exception as e:
+            print(f"⚠️ 동적 파라미터 설정 오류 ({ticker}): {e}")
+            return base_params
+    
     def _analyze_volume_pattern(self, ticker, timeframe_hours):
         """거래량 패턴 분석"""
         try:
@@ -1254,7 +1406,7 @@ class CoinSpecificGridManager:
                 range_adjustment = min(price_range_ratio * 100, 1.5)      # 최대 1.5배
                 
                 optimal_grid_count = int(base_grid_count * volatility_adjustment * range_adjustment)
-                optimal_grid_count = max(10, min(optimal_grid_count, 50))  # 10-50개 제한
+                optimal_grid_count = max(10, min(optimal_grid_count, 35))  # 10-35개 제한 (최적화)
                 
             else:
                 optimal_grid_count = 20  # 기본값
@@ -1410,7 +1562,7 @@ class AutoTradingSystem:
                 "rebalance_threshold": 0.12
             },
             "극공격적": {
-                "max_grid_count": 50,
+                "max_grid_count": 35,
                 "max_investment_ratio": 0.9,
                 "panic_threshold": -10.0,
                 "stop_loss_threshold": -15.0,
@@ -1663,7 +1815,7 @@ class AutoTradingSystem:
             if volume_ratio > 3.0:  # 거래량 3배 이상 증가
                 grid_count = int(grid_count * 1.2)  # 20% 증가
             
-            return max(10, min(60, grid_count))  # 최종 범위 제한
+            return max(10, min(35, grid_count))  # 최종 범위 제한 (최적화)
             
         except Exception as e:
             print(f"트렌드 조정 오류: {e}")
@@ -3903,15 +4055,20 @@ def calculate_real_total_assets():
                 print(f"⚠️ {coin} 자산 계산 오류: {coin_error}")
                 detailed_assets[coin] = {'balance': 0, 'price': 0, 'value': 0}
         
-        print(f"💰 실거래 총자산: {total_assets:,.0f}원")
+        print(f"💰 실거래 총자산: {total_assets:,.0f}원 (실제 API 잔고 기준)")
         print(f"📊 자산 구성: KRW {krw_balance:,.0f}원 + 코인 {total_assets - krw_balance:,.0f}원")
         
-        # 총자산이 현재 config보다 크게 변했다면 config 업데이트
+        # 실거래 모드에서는 config 업데이트를 더 적극적으로 수행
         config_total = float(config.get('total_investment', 1000000))
-        if abs(total_assets - config_total) > config_total * 0.1:  # 10% 이상 차이
+        print(f"🔍 Config 비교: 설정값 {config_total:,.0f}원 vs 실제 {total_assets:,.0f}원")
+        
+        # 실거래 모드에서는 5% 이상 차이 시 업데이트 (데모보다 더 민감하게)
+        if abs(total_assets - config_total) > max(config_total * 0.05, 10000):  # 5% 이상 또는 1만원 이상 차이
+            old_total = config_total
             config['total_investment'] = total_assets
             save_config()
-            print(f"✅ Config 총투자금 업데이트: {config_total:,.0f}원 → {total_assets:,.0f}원")
+            print(f"✅ 실거래 모드 - Config 총투자금 자동 업데이트: {old_total:,.0f}원 → {total_assets:,.0f}원")
+            print(f"📝 실제 API 잔고 기준으로 설정이 동기화되었습니다.")
         
         return total_assets
         
@@ -4045,7 +4202,7 @@ current_log_popup = None
 current_log_tree = None
 
 def initialize_upbit():
-    """업비트 API 초기화 (강화된 로깅)"""
+    """업비트 API 초기화 (Windows 호환성 강화)"""
     global upbit
     try:
         if not config.get("upbit_access") or not config.get("upbit_secret"):
@@ -4056,32 +4213,65 @@ def initialize_upbit():
         logger.info(f"🔑 Upbit API 초기화 시작...")
         print(f"🔑 Upbit API 연결 시도 중...")
         
+        # Windows에서 더 안정적인 API 초기화를 위한 설정
+        import platform
+        if platform.system() == 'Windows':
+            print("🪟 Windows 시스템 감지 - 호환성 모드 활성화")
+            # Windows에서 더 긴 타임아웃 설정
+            import requests
+            session = requests.Session()
+            session.timeout = (10, 30)  # (연결 타임아웃, 읽기 타임아웃)
+            # pyupbit에서 세션 타임아웃 설정은 내부적으로 처리됨
+        
         upbit = pyupbit.Upbit(config["upbit_access"], config["upbit_secret"])
         
-        # API 연결 테스트 (재시도 로직)
-        for attempt in range(3):
+        # API 연결 테스트 (Windows 호환 재시도 로직)
+        max_attempts = 5 if platform.system() == 'Windows' else 3
+        sleep_duration = 2 if platform.system() == 'Windows' else 1
+        
+        for attempt in range(max_attempts):
             try:
-                print(f"🔍 API 연결 테스트 중... (시도 {attempt + 1}/3)")
+                print(f"🔍 API 연결 테스트 중... (시도 {attempt + 1}/{max_attempts})")
+                
+                # Windows에서는 더 보수적인 접근
+                if platform.system() == 'Windows' and attempt > 0:
+                    print("   ⏳ Windows 안정성을 위해 추가 대기...")
+                    time.sleep(sleep_duration)
+                
                 balances = upbit.get_balances()
                 if balances is not None:
                     logger.info("✅ Upbit API 초기화 및 연결 테스트 성공")
-                    print("✅ Upbit API 연결 성공")
+                    print(f"✅ Upbit API 연결 성공 (시도 {attempt + 1}/{max_attempts})")
                     return True
                 else:
-                    print(f"⚠️ 잔고 조회 실패 - 재시도 {attempt + 1}/3...")
-                    time.sleep(1)
+                    print(f"⚠️ 잔고 조회 실패 - 재시도 {attempt + 1}/{max_attempts}...")
+                    time.sleep(sleep_duration)
+                    
             except Exception as test_error:
                 logger.error(f"❌ API 연결 테스트 시도 {attempt + 1} 실패: {test_error}")
                 print(f"❌ API 연결 테스트 시도 {attempt + 1} 실패: {test_error}")
-                time.sleep(1)
+                
+                # Windows 특별 오류 처리
+                if platform.system() == 'Windows':
+                    error_str = str(test_error).lower()
+                    if 'timeout' in error_str or 'connection' in error_str:
+                        print("   🪟 Windows 네트워크 타임아웃 감지 - 재시도 간격 증가")
+                        time.sleep(sleep_duration * 2)
+                    else:
+                        time.sleep(sleep_duration)
+                else:
+                    time.sleep(sleep_duration)
         
         # 모든 재시도 실패
         logger.error("❌ 모든 API 연결 시도 실패")
         print("❌ 모든 API 연결 시도 실패 - API 키와 권한을 확인하세요")
         print("💡 해결 방법:")
         print("   1. 업비트 API 키가 올바른지 확인")
-        print("   2. '자산 조회' 권한이 활성화되어 있는지 확인")
+        print("   2. '자산 조회' 권한이 활성화되어 있는지 확인") 
         print("   3. 네트워크 연결 상태 확인")
+        if platform.system() == 'Windows':
+            print("   4. 🪟 Windows: 방화벽/백신 프로그램에서 Python 허용 확인")
+            print("   5. 🪟 Windows: 관리자 권한으로 실행 시도")
         return False
             
     except Exception as e:
@@ -4145,11 +4335,26 @@ class UnifiedTradingLogic:
                 return action_result
             
             else:
-                # 가격이 반등하여 최저 그리드를 '확실히' 돌파했는지 체크
-                confirmation_buffer = 0.001  # 0.1% 버퍼
-                buy_confirmation_price = self.grid_levels[self.lowest_grid_to_buy] * (1 + confirmation_buffer)
+                # 그리드 트레이딩: 가격이 그리드 레벨에 도달하면 매수 (상승 확인이 아닌 도달 확인)
+                # 변동성 기반 동적 확인 버퍼 계산
+                volatility_data = self.calculate_price_volatility(self.ticker_for_logs or 'KRW-XRP')
+                trading_params = self.get_dynamic_trading_params(self.ticker_for_logs or 'KRW-XRP', volatility_data)
+                confirmation_buffer = trading_params['confirmation_buffer'] / 100  # 백분율을 소수로 변환
+                print(f"📡 동적 확인버퍼 적용: {confirmation_buffer*100:.3f}% (변동성: {volatility_data['trading_intensity']})")
+                grid_buy_price = self.grid_levels[self.lowest_grid_to_buy]
+                buy_confirmation_price_low = grid_buy_price * (1 - confirmation_buffer)  # 그리드 가격의 99.9% 이하에서 매수
+                buy_confirmation_price_high = grid_buy_price * (1 + confirmation_buffer)  # 그리드 가격의 100.1% 이상에서도 매수
                 
-                if price >= buy_confirmation_price and demo_balance >= self.amount_per_grid:
+                # 매수 보류 시간 기반 강제 매수 조건 추가
+                pending_duration_seconds = (current_time - self.buy_pending_start_time).total_seconds()
+                force_buy_after_seconds = 300  # 5분 후 강제 매수
+                
+                # 조건 1: 그리드 가격 범위 도달 확인 (99.9% ~ 100.1%) 또는 조건 2: 5분 대기 후 강제 매수
+                price_in_grid_range = (price <= buy_confirmation_price_high and price >= buy_confirmation_price_low)
+                time_based_force_buy = (pending_duration_seconds >= force_buy_after_seconds and 
+                                      price >= grid_buy_price * 0.995)  # 그리드 가격의 99.5%까지 허용
+                
+                if (price_in_grid_range or time_based_force_buy) and demo_balance >= self.amount_per_grid:
                     # 매수 조건 충족
                     buy_price = self.grid_levels[self.lowest_grid_to_buy]
                     quantity = (self.amount_per_grid * (1 - self.fee_rate)) / buy_price
@@ -4161,6 +4366,7 @@ class UnifiedTradingLogic:
                     action_result['details'] = {
                         "grid_price": f"{buy_price:,.0f}원",
                         "actual_price": f"{price:,.0f}원",
+                        "buy_range": f"{buy_confirmation_price_low:,.0f}~{buy_confirmation_price_high:,.0f}원",
                         "quantity": f"{quantity:.8f}개",
                         "investment": f"{self.amount_per_grid:,.0f}원"
                     }
@@ -4193,7 +4399,7 @@ class UnifiedTradingLogic:
         
         return action_result
     
-    def check_sell_conditions(self, price, demo_positions, config):
+    def check_sell_conditions(self, price, demo_positions, config, grid_state=None):
         """매도 조건 검사 (트레일링 스탑, 손절, 그리드 매도 포함)"""
         sell_actions = []
         
@@ -4243,27 +4449,54 @@ class UnifiedTradingLogic:
         self.lowest_grid_to_buy = -1
 
 def initialize_real_trading_with_balance():
-    """실거래 모드에서 업비트 잔고를 기반으로 초기화"""
+    """실거래 모드에서 업비트 잔고를 기반으로 초기화 (Windows 호환성 강화)"""
     try:
         print("💰 업비트 잔고 조회 중...")
         
-        # 재시도 로직 추가
+        # Windows 호환성을 위한 재시도 로직 강화
+        import platform
         balances = None
-        for attempt in range(3):
+        max_attempts = 5 if platform.system() == 'Windows' else 3
+        sleep_duration = 2 if platform.system() == 'Windows' else 1
+        
+        if platform.system() == 'Windows':
+            print("🪟 Windows 시스템에서 잔고 조회 중...")
+        
+        for attempt in range(max_attempts):
             try:
+                if platform.system() == 'Windows' and attempt > 0:
+                    print(f"   ⏳ Windows 안정성을 위해 {sleep_duration}초 대기...")
+                    time.sleep(sleep_duration)
+                
                 balances = pyupbit.get_balances()
                 if balances is not None:
-                    print(f"✅ 잔고 조회 성공 (시도 {attempt + 1}/3)")
+                    print(f"✅ 잔고 조회 성공 (시도 {attempt + 1}/{max_attempts})")
                     break
-                print(f"⚠️ 잔고 조회 재시도 {attempt + 1}/3...")
-                time.sleep(1)
+                print(f"⚠️ 잔고 조회 재시도 {attempt + 1}/{max_attempts}...")
+                time.sleep(sleep_duration)
             except Exception as retry_e:
                 print(f"⚠️ 잔고 조회 시도 {attempt + 1} 실패: {retry_e}")
-                time.sleep(1)
+                
+                # Windows 특별 오류 처리
+                if platform.system() == 'Windows':
+                    error_str = str(retry_e).lower()
+                    if 'timeout' in error_str or 'connection' in error_str:
+                        print("   🪟 Windows 네트워크 문제 감지 - 재시도 간격 증가")
+                        time.sleep(sleep_duration * 2)
+                    else:
+                        time.sleep(sleep_duration)
+                else:
+                    time.sleep(sleep_duration)
         
         if not balances:
             print("❌ 잔고 조회 최종 실패 - API 키 권한을 확인하세요")
             print("💡 해결 방법: 업비트 API 키의 '자산 조회' 권한이 활성화되어 있는지 확인하세요")
+            if platform.system() == 'Windows':
+                print("🪟 Windows 추가 해결 방법:")
+                print("   - 방화벽에서 Python.exe 허용 설정 확인")
+                print("   - 백신 프로그램에서 실시간 검사 예외 추가")
+                print("   - 관리자 권한으로 실행 시도")
+                print("   - Windows 디펜더 실시간 보호에서 폴더 예외 추가")
             return None
         
         # KRW 잔고와 선택된 코인들의 잔고 조회
@@ -4486,10 +4719,12 @@ def check_and_sell_profitable_positions(ticker, demo_mode=True):
                 should_sell = True
                 sell_reason = f"트레일링스톱({profit_rate:.1f}%)"
             
-            # 3. 기본 수익 실현 (기존 로직)
+            # 3. 지능적 수익 실현 (트렌드 분석 기반)
             elif current_price > buy_price * 1.005:  # 0.5% 이상 수익시
                 should_sell = True
                 sell_reason = f"수익실현({profit_rate:.1f}%)"
+            # 4. 트렌드 변화 기반 조기 매도 (메인 거래 로직에서 구현됨)
+            # 이 함수는 사용되지 않고 메인 거래 로직에서 지능형 매도가 구현되어 있음
             
             if should_sell:
                 # 매도 처리
@@ -5060,6 +5295,7 @@ def execute_buy_order(ticker, amount, current_price, use_limit=True):
     """개선된 매수 주문 실행"""
     global upbit, trade_counts
     if upbit is None:
+        print(f"❌ DEBUG: upbit 객체가 None입니다.")
         return None
     
     try:
@@ -5072,25 +5308,45 @@ def execute_buy_order(ticker, amount, current_price, use_limit=True):
             limit_price = round(limit_price)
             
             quantity = amount / limit_price
+            print(f"🔍 DEBUG: 지정가 매수 시도 - {ticker}, 가격: {limit_price}원, 수량: {quantity:.8f}, 금액: {amount:,.0f}원")
             result = upbit.buy_limit_order(ticker, limit_price, quantity)
         else:
             # 시장가 주문
+            print(f"🔍 DEBUG: 시장가 매수 시도 - {ticker}, 금액: {amount:,.0f}원")
             result = upbit.buy_market_order(ticker, amount)
         
-        # 매수 카운트는 initialize_trade_counts_from_logs()에서만 처리
+        # API 응답 상세 로깅
+        print(f"🔍 DEBUG: API 응답 전체: {result}")
+        if result:
+            print(f"🔍 DEBUG: API 응답 타입: {type(result)}")
+            if isinstance(result, dict):
+                print(f"🔍 DEBUG: API 응답 키들: {list(result.keys())}")
+                if 'error' in result:
+                    print(f"❌ DEBUG: API 오류 응답: {result['error']}")
+                if 'uuid' in result:
+                    print(f"✅ DEBUG: UUID 발견: {result['uuid']}")
+                else:
+                    print(f"❌ DEBUG: UUID 없음 - 매수 주문 실패로 판단")
+        else:
+            print(f"❌ DEBUG: API 응답이 None 또는 False")
             
         return result
     except requests.exceptions.RequestException as e:
-        print(f"매수 주문 네트워크 오류: {e}")
+        print(f"❌ 매수 주문 네트워크 오류: {e}")
+        print(f"🔍 DEBUG: 네트워크 오류 상세: {type(e).__name__}: {str(e)}")
         return None
     except Exception as e:
-        print(f"매수 주문 실행 오류: {e}")
+        print(f"❌ 매수 주문 실행 오류: {e}")
+        print(f"🔍 DEBUG: 실행 오류 상세: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(f"🔍 DEBUG: 스택 트레이스: {traceback.format_exc()}")
         return None
 
 def execute_sell_order(ticker, quantity, current_price, use_limit=True):
     """개선된 매도 주문 실행"""
     global upbit, trade_counts
     if upbit is None:
+        print(f"❌ DEBUG: upbit 객체가 None입니다.")
         return None
     
     try:
@@ -5100,20 +5356,45 @@ def execute_sell_order(ticker, quantity, current_price, use_limit=True):
             buffer = config.get("limit_order_buffer", 0.2) / 100
             limit_price = current_price * (1 - buffer)
             limit_price = round(limit_price)
-            
+            print(f"🔍 DEBUG: 지정가 매도 시도 - {ticker}, 가격: {limit_price}원, 수량: {quantity:.8f}, 예상금액: {limit_price * quantity:,.0f}원")
             result = upbit.sell_limit_order(ticker, limit_price, quantity)
         else:
             # 시장가 주문
+            print(f"🔍 DEBUG: 시장가 매도 시도 - {ticker}, 수량: {quantity:.8f}, 예상금액: {current_price * quantity:,.0f}원")
             result = upbit.sell_market_order(ticker, quantity)
+            
+        # API 응답 상세 로깅
+        print(f"🔍 DEBUG: 매도 API 응답 전체: {result}")
+        
+        if result:
+            if result.get('error'):
+                print(f"❌ DEBUG: 매도 API 에러 - {result.get('error')}")
+                if 'message' in result:
+                    print(f"❌ DEBUG: 에러 메시지 - {result['message']}")
+                return None
+            elif result.get('uuid'):
+                print(f"✅ DEBUG: 매도 주문 성공 - UUID: {result['uuid']}")
+                print(f"✅ DEBUG: 매도 상세정보: {result}")
+                return result
+            else:
+                print(f"⚠️ DEBUG: 매도 응답에 UUID 없음 - {result}")
+                return result
+        else:
+            print(f"❌ DEBUG: 매도 API 응답이 None")
+            return None
             
         # 매도 카운트는 initialize_trade_counts_from_logs()에서만 처리
             
         return result
     except requests.exceptions.RequestException as e:
-        print(f"매도 주문 네트워크 오류: {e}")
+        print(f"❌ 매도 주문 네트워크 오류: {e}")
+        print(f"🔍 DEBUG: 네트워크 오류 상세 - ticker: {ticker}, quantity: {quantity}, price: {current_price}")
         return None
     except Exception as e:
-        print(f"매도 주문 실행 오류: {e}")
+        print(f"❌ 매도 주문 실행 오류: {e}")
+        print(f"🔍 DEBUG: 매도 오류 상세 - ticker: {ticker}, quantity: {quantity}, price: {current_price}")
+        import traceback
+        print(f"🔍 DEBUG: 매도 오류 스택트레이스: {traceback.format_exc()}")
         return None
 
 # 상태 평가 개선
@@ -5528,7 +5809,7 @@ def calculate_safe_grid_levels(high_price, low_price, grid_count, ticker=""):
     return grid_levels
 
 def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, investment_amount=1000000, ticker=None):
-    """코인별 최적화된 그리드 수 계산"""
+    """코인별 최적화된 그리드 수 계산 (최소 주문 금액 고려)"""
     # 코인별 최적화 사용
     if ticker and config.get('auto_trading_mode', False):
         optimal_grids = coin_grid_manager.calculate_optimal_grid_count(ticker, [high_price, low_price], investment_amount)
@@ -5536,10 +5817,14 @@ def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, i
         return optimal_grids
     """
     가격 범위와 거래 수수료를 고려하여 최적의 그리드 개수를 자동 계산
+    최소 주문 금액 (6000원)을 고려하여 그리드 개수 제한
     """
     if low_price <= 0 or high_price <= low_price:
         return 15  # 기본값
 
+    # 최소 주문 금액 (config에서 가져옴)
+    min_order_amount = config.get('min_order_amount', 6000)
+    
     # 전체 가격 범위 백분율
     price_range_percent = ((high_price - low_price) / low_price) * 100
 
@@ -5549,13 +5834,27 @@ def calculate_auto_grid_count_enhanced(high_price, low_price, fee_rate=0.0005, i
     # 이론적 최대 그리드 개수
     max_possible_grids = price_range_percent / min_profit_per_grid
     
-    # 투자금액을 고려한 그리드 개수 조정
-    min_investment_per_grid = 50000  # 격당 최소 투자금 5만원
+    # 최소 주문 금액을 고려한 그리드 개수 제한 (신규 추가)
+    # 각 그리드마다 최소 주문 금액을 만족해야 함 - 안전 마진 20% 추가
+    safety_margin = 1.2  # 20% 안전 마진
+    min_amount_per_grid = min_order_amount * safety_margin
+    max_grids_by_min_order = investment_amount / min_amount_per_grid
+    
+    # 투자금액을 고려한 그리드 개수 조정 (수정)
+    # 최소 주문 금액 기준으로 조정하되, 너무 작지 않게 보정
+    min_investment_per_grid = max(min_amount_per_grid, 10000)  # 최소 1만원
     max_grids_by_investment = investment_amount / min_investment_per_grid
     
-    # 최종 그리드 개수 결정
-    optimal_grids = min(max_possible_grids, max_grids_by_investment)
-    optimal_grids = max(10, min(50, int(optimal_grids)))  # 10~50 개 제한
+    print(f"🔍 그리드 개수 제한 분석 ({ticker}):")
+    print(f"   이론적 최대: {max_possible_grids:.1f}개")
+    print(f"   투자금 기준: {max_grids_by_investment:.1f}개 (그리드당 {min_investment_per_grid:,}원)")
+    print(f"   최소주문금액 기준: {max_grids_by_min_order:.1f}개 (그리드당 {min_amount_per_grid:,}원)")
+    
+    # 최종 그리드 개수 결정 (모든 제한 조건 중 최소값)
+    optimal_grids = min(max_possible_grids, max_grids_by_investment, max_grids_by_min_order)
+    optimal_grids = max(5, min(30, int(optimal_grids)))  # 5~30 개 제한으로 수정하여 더 큰 주문 금액 보장
+    
+    print(f"   ✅ 최종 선택: {optimal_grids}개 그리드")
     
     return optimal_grids
 
@@ -6072,14 +6371,16 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
     global config, upbit  # 전역 변수 접근을 위한 선언
     start_time = datetime.now()
 
-    # 목표 수익률 처리
+    # 목표 수익률 처리 (기본값: 그리드 간격의 2배 수익률)
     if target_profit_percent_str and target_profit_percent_str.strip():
         try:
             target_profit_percent = float(target_profit_percent_str)
+            if target_profit_percent == float('inf') or target_profit_percent > 100:  # 무한대이거나 100% 초과시
+                target_profit_percent = 2.0  # 2% 기본값
         except (ValueError, TypeError):
-            target_profit_percent = float('inf') # 잘못된 값이면 무한으로 처리
+            target_profit_percent = 2.0  # 잘못된 값이면 2% 기본값
     else:
-        target_profit_percent = float('inf') # 미지정이면 무한으로 처리
+        target_profit_percent = 2.0  # 미지정이면 2% 기본값
 
     def update_gui(key, *args):
         gui_queue.put((key, ticker, args))
@@ -6314,6 +6615,21 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         
         # 3단계: 남은 포지션 로드
         demo_positions = load_trading_state(ticker, demo_mode)
+        
+        # 기존 포지션 중 무한대 목표가 수정 (마이그레이션)
+        positions_updated = False
+        for pos in demo_positions:
+            target_price = pos.get('target_sell_price', 0)
+            if target_price == float('inf') or target_price > pos['actual_buy_price'] * 10:  # 무한대이거나 매수가 10배 초과시
+                pos['target_sell_price'] = pos['actual_buy_price'] * 1.02  # 2% 수익률로 수정
+                positions_updated = True
+                print(f"🔧 DEBUG: {ticker} 포지션 목표가 수정 - {pos['actual_buy_price']:,.0f}원 → {pos['target_sell_price']:,.0f}원")
+        
+        # 수정된 포지션 저장
+        if positions_updated:
+            save_trading_state(ticker, demo_positions, demo_mode)
+            print(f"💾 DEBUG: {ticker} 수정된 포지션 저장 완료")
+        
         current_held_assets_value = sum(pos['quantity'] * current_price_for_calc for pos in demo_positions)
         invested_in_held_positions = sum(pos['quantity'] * pos['buy_price'] for pos in demo_positions)
         
@@ -6460,6 +6776,20 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
         if real_positions:
             print(f"   📊 기존 포지션 복원: {len(real_positions)}개")
             log_and_update('정보', f'{len(real_positions)}개의 포지션을 복원했습니다.')
+            
+            # 기존 포지션 중 무한대 목표가 수정 (마이그레이션)
+            positions_updated = False
+            for pos in real_positions:
+                target_price = pos.get('target_sell_price', 0)
+                if target_price == float('inf') or target_price > pos['actual_buy_price'] * 10:  # 무한대이거나 매수가 10배 초과시
+                    pos['target_sell_price'] = pos['actual_buy_price'] * 1.02  # 2% 수익률로 수정
+                    positions_updated = True
+                    print(f"🔧 DEBUG: {ticker} 실거래 포지션 목표가 수정 - {pos['actual_buy_price']:,.0f}원 → {pos['target_sell_price']:,.0f}원")
+            
+            # 수정된 포지션 저장
+            if positions_updated:
+                save_trading_state(ticker, real_positions, False)
+                print(f"💾 DEBUG: {ticker} 수정된 실거래 포지션 저장 완료")
         else:
             # 포지션이 없지만 코인을 보유하고 있다면 자동으로 포지션 생성
             if current_coin_balance > 0.0001:  # 최소 보유량 체크
@@ -7169,7 +7499,11 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
 
                     else:
                         # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행 + 기술적 분석)
-                        confirmation_buffer = 0.001 # 0.1% 버퍼
+                        # 데모 모드도 변동성 기반 동적 확인 버퍼 사용
+                        volatility_data = advanced_grid_state.calculate_price_volatility(ticker)
+                        trading_params = advanced_grid_state.get_dynamic_trading_params(ticker, volatility_data)
+                        confirmation_buffer = trading_params['confirmation_buffer'] / 100
+                        print(f"📡 데모 동적 확인버퍼 적용: {confirmation_buffer*100:.3f}% (변동성: {volatility_data['trading_intensity']})")
                         sell_confirmation_price = grid_levels[current_highest_grid] * (1 - confirmation_buffer)
                         price_condition_met = price <= sell_confirmation_price
                         
@@ -7440,13 +7774,25 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
             
             # 매수 실행
             elif buy_action['should_buy'] and demo_balance >= amount_per_grid:
+                # 최소 주문 금액 확인
+                min_order_amount = config.get('min_order_amount', 6000)
+                if amount_per_grid < min_order_amount:
+                    print(f"⚠️ 최소 주문 금액 미달: {amount_per_grid:,.0f}원 < {min_order_amount:,}원")
+                    log_trade(ticker, "매수 취소", f"최소 주문 금액 미달: {amount_per_grid:,.0f}원", "주문 금액 부족", {"min_required": min_order_amount})
+                    continue
+                
                 # 실제 매수 주문 실행
+                print(f"🔍 DEBUG: 매수 실행 시작 - {ticker}, 현재가: {price:,.0f}원, 투자금액: {amount_per_grid:,.0f}원, 잔고: {demo_balance:,.0f}원")
                 try:
                     buy_result = execute_buy_order(ticker, amount_per_grid, price)
+                    print(f"🔍 DEBUG: execute_buy_order 반환값: {buy_result}")
+                    
                     if buy_result and buy_result.get('uuid'):
                         # 매수 성공 시 포지션 추가
                         buy_price = buy_action['buy_price']
                         quantity = buy_action['quantity']
+                        
+                        print(f"✅ DEBUG: 매수 주문 성공! UUID: {buy_result.get('uuid')}")
                         
                         new_position = {
                             'quantity': quantity,
@@ -7475,11 +7821,31 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                         update_gui('refresh_chart')
                         update_gui('action_status', 'trading')
                     else:
-                        print(f"❌ 실거래 매수 실패: API 응답 오류")
-                        log_trade(ticker, "매수 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(buy_result)})
+                        # 상세한 실패 원인 분석
+                        failure_reason = "알 수 없는 오류"
+                        if buy_result is None:
+                            failure_reason = "API 응답이 None"
+                        elif not buy_result:
+                            failure_reason = "API 응답이 False 또는 빈값"
+                        elif isinstance(buy_result, dict):
+                            if 'error' in buy_result:
+                                failure_reason = f"API 오류: {buy_result['error']}"
+                            elif 'uuid' not in buy_result:
+                                failure_reason = "UUID 누락 - 주문 접수 실패"
+                            else:
+                                failure_reason = f"예상치 못한 응답 구조: {list(buy_result.keys())}"
+                        else:
+                            failure_reason = f"예상치 못한 응답 타입: {type(buy_result)}"
+                            
+                        print(f"❌ 실거래 매수 실패: {failure_reason}")
+                        print(f"🔍 DEBUG: 매수 실패 상세 - buy_result: {buy_result}")
+                        log_trade(ticker, "매수 실패", f"주문 실패: {price:,.0f}원", failure_reason, {"error": str(buy_result), "debug_reason": failure_reason})
                 except Exception as e:
                     print(f"❌ 실거래 매수 오류: {e}")
-                    log_trade(ticker, "매수 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e)})
+                    print(f"🔍 DEBUG: 매수 오류 상세: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    print(f"🔍 DEBUG: 매수 오류 스택 트레이스: {traceback.format_exc()}")
+                    log_trade(ticker, "매수 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e), "exception_type": type(e).__name__})
             
             # 그리드 도달 체크 (데모모드와 동일한 로직)
             else:
@@ -7500,57 +7866,269 @@ def grid_trading(ticker, grid_count, total_investment, demo_mode, target_profit_
                             update_gui('action_status', 'looking_buy')
                             break # 첫번째 도달한 그리드만 처리
             
-            # 실거래 매도 로직
+            # 실거래 매도 로직 (데모모드 고급 로직 채용)
             for position in demo_positions[:]:
-                if price >= position['target_sell_price']:
-                    try:
-                        sell_result = execute_sell_order(ticker, position['quantity'], price)
-                        if sell_result and sell_result.get('uuid'):
-                            # 매도 성공 시 포지션 제거 및 수익 계산
-                            sell_amount = position['quantity'] * price * (1 - fee_rate)
-                            buy_cost = position['quantity'] * position['actual_buy_price']
-                            net_profit = sell_amount - buy_cost
+                print(f"🔍 DEBUG: 실거래 매도 조건 체크 - 현재가: {price:,.0f}원, 수량: {position['quantity']:.8f}")
+                
+                # 최소 주문 금액 확인 (6000원)
+                min_order_amount = config.get('min_order_amount', 6000)
+                sell_amount = position['quantity'] * price
+                
+                if sell_amount < min_order_amount:
+                    print(f"⚠️ 매도 최소 금액 미달: {sell_amount:,.0f}원 < {min_order_amount:,}원 - 매도 보류")
+                    continue
+                
+                # 상승 추세 추종 매도 로직 (데모모드와 동일)
+                if position.get('sell_held', False):
+                    # 매도 보류 상태일 때
+                    current_highest_grid = position['highest_grid_reached']
+                    
+                    # 가격이 다음 그리드 이상으로 상승했는지 체크
+                    if current_highest_grid < len(grid_levels) - 1 and price >= grid_levels[current_highest_grid + 1]:
+                        position['highest_grid_reached'] += 1
+                        new_target_price = grid_levels[position['highest_grid_reached']]
+                        position['target_sell_price'] = new_target_price
+                        log_msg = f"실거래 매도 보류 및 목표 상향: {new_target_price:,.0f}원"
+                        
+                        # 매도 보류 목표 상향 이유 기록
+                        hold_reason = f"상승 추세 지속으로 그리드 {current_highest_grid+2} 레벨 목표 상향"
+                        hold_details = {
+                            "previous_target": f"{grid_levels[current_highest_grid]:,.0f}원",
+                            "new_target": f"{new_target_price:,.0f}원",
+                            "current_price": f"{price:,.0f}원",
+                            "grid_level": f"{position['highest_grid_reached']+1}/{len(grid_levels)}"
+                        }
+                        log_trade(ticker, "실거래 매도보류", log_msg, hold_reason, hold_details)
+                        speak_async(f"{get_korean_coin_name(ticker)} " + "실거래 매도 보류 시작")
+                        save_trading_state(ticker, demo_positions, demo_mode)
+                        update_gui('refresh_chart')
+                        update_gui('action_status', 'looking_sell')
+                        print(f"📈 실거래 매도 목표 상향: {new_target_price:,.0f}원 (그리드 {position['highest_grid_reached']+1})")
+
+                    else:
+                        # 가격이 최고 그리드 아래로 '확실히' 하락했는지 체크 (매도 실행 + 기술적 분석)
+                        # 실거래에서도 변동성 기반 동적 확인 버퍼 적용
+                        volatility_data = advanced_grid_state.calculate_price_volatility(ticker)
+                        trading_params = advanced_grid_state.get_dynamic_trading_params(ticker, volatility_data)
+                        confirmation_buffer = trading_params['confirmation_buffer'] / 100
+                        print(f"📡 실거래 동적 확인버퍼 적용: {confirmation_buffer*100:.3f}% (변동성: {volatility_data['trading_intensity']})")
+                        sell_confirmation_price = grid_levels[current_highest_grid] * (1 - confirmation_buffer)
+                        price_condition_met = price <= sell_confirmation_price
+                        
+                        print(f"🔍 DEBUG: 실거래 매도 신호 검증 - 현재가: {price:,.0f}, 확인가: {sell_confirmation_price:,.0f}, 조건충족: {price_condition_met}")
+                        
+                        if price_condition_met:
+                            # 기술적 분석으로 매도 신호 검증
+                            should_override = False
+                            technical_signal = 'sell'
+                            confidence = 100
                             
-                            demo_positions.remove(position)
-                            save_trading_state(ticker, demo_positions, demo_mode)
+                            try:
+                                should_override, technical_analysis = technical_analyzer.should_override_grid_signal(ticker, 'sell', price)
+                                technical_signal = technical_analysis.get('signal', 'hold')
+                                confidence = technical_analysis.get('confidence', 0)
+                            except Exception as e:
+                                print(f"⚠️ 기술적 분석 오류 (매도 진행): {e}")
                             
-                            demo_balance += sell_amount
-                            total_realized_profit += net_profit
+                            # 매도 실행 조건:
+                            # 1. 기술적 분석이 매도를 방해하지 않음 (override가 아님)
+                            # 2. 또는 기술적 분석이 강한 매도 신호
+                            execute_sell = not should_override or technical_signal in ['strong_sell', 'sell']
                             
-                            # profits.json에 수익 저장
-                            profits_data = load_profits_data()
-                            current_profit = profits_data.get(ticker, 0)
-                            profits_data[ticker] = current_profit + net_profit
-                            save_profits_data(profits_data)
+                            print(f"🔍 DEBUG: 실거래 매도 실행 판단 - override: {should_override}, 신호: {technical_signal}, 신뢰도: {confidence}%, 실행: {execute_sell}")
                             
-                            sell_reason = f"목표 수익률 달성"
-                            sell_details = {
-                                "sell_price": f"{price:,.0f}원",
-                                "quantity": f"{position['quantity']:.8f}개",
-                                "profit": f"{net_profit:,.0f}원",
-                                "profit_rate": f"{(net_profit/buy_cost*100):+.2f}%",
-                                "order_id": sell_result.get('uuid')
-                            }
-                            log_trade(ticker, "실거래 매도", f"{price:,.0f}원 ({position['quantity']:.6f}개) 수익: {net_profit:,.0f}원", sell_reason, sell_details)
-                            speak_async(f"실거래 매도, {get_korean_coin_name(ticker)} {price:,.0f}원, 수익 {net_profit:,.0f}원")
-                            
-                            print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
-                            
-                            # 매도 카운트 업데이트
-                            if ticker in trade_counts:
-                                trade_counts[ticker]["sell"] += 1
-                                if net_profit > 0:
-                                    trade_counts[ticker]["profitable_sell"] += 1
-                            
-                            update_gui('refresh_chart')  # GUI 즉시 새로고침
-                                
+                            if execute_sell:
+                                print(f"✅ DEBUG: 실거래 매도 조건 충족! 매도 실행 시도...")
+                                try:
+                                    sell_result = execute_sell_order(ticker, position['quantity'], price)
+                                    if sell_result and sell_result.get('uuid'):
+                                        # 매도 성공 시 포지션 제거 및 수익 계산
+                                        sell_price = grid_levels[current_highest_grid]  # 그리드 가격으로 매도
+                                        actual_sell_amount = position['quantity'] * price * (1 - fee_rate)
+                                        buy_cost = position['quantity'] * position['actual_buy_price']
+                                        net_profit = actual_sell_amount - buy_cost
+                                        
+                                        demo_positions.remove(position)
+                                        save_trading_state(ticker, demo_positions, demo_mode)
+                                        
+                                        demo_balance += actual_sell_amount
+                                        total_realized_profit += net_profit
+                                        
+                                        # profits.json에 수익 저장 (새로운 형식)
+                                        profits_data = load_profits_data()
+                                        if ticker not in profits_data:
+                                            profits_data[ticker] = []
+                                        
+                                        profit_record = {
+                                            "timestamp": datetime.now().isoformat(),
+                                            "trade_type": "grid_sell",
+                                            "buy_price": position['actual_buy_price'],
+                                            "sell_price": price,
+                                            "amount": position['quantity'],
+                                            "investment_amount": buy_cost,
+                                            "profit_amount": net_profit,
+                                            "profit_rate": (net_profit / buy_cost * 100) if buy_cost > 0 else 0,
+                                            "buy_order_id": position.get('buy_order_id', ''),
+                                            "sell_order_id": sell_result.get('uuid')
+                                        }
+                                        profits_data[ticker].append(profit_record)
+                                        save_profits_data(profits_data)
+                                        
+                                        # 기술적 분석 정보 포함한 로그
+                                        signal_info = f" (기술분석: {technical_signal}, 신뢰도: {confidence:.0f}%)" if confidence > 50 else ""
+                                        log_msg = f"실거래 상승추세 종료 매도: {price:,.0f}원 ({position['quantity']:.6f}개) 순수익: {net_profit:,.0f}원{signal_info}"
+                                        
+                                        # 그리드 매도 실행 이유 상세 기록
+                                        grid_sell_reason = f"그리드 레벨 {current_highest_grid+1} 하락 확인"
+                                        grid_sell_details = {
+                                            "buy_price": f"{position['actual_buy_price']:,.0f}원",
+                                            "sell_price": f"{price:,.0f}원",
+                                            "grid_level": f"{current_highest_grid+1}/{len(grid_levels)}",
+                                            "confirmation_price": f"{sell_confirmation_price:,.0f}원",
+                                            "technical_signal": technical_signal,
+                                            "confidence": f"{confidence:.0f}%",
+                                            "profit": f"{net_profit:,.0f}원",
+                                            "profit_rate": f"{(net_profit/buy_cost*100):+.2f}%",
+                                            "order_id": sell_result.get('uuid')
+                                        }
+                                        log_trade(ticker, "실거래 매도", log_msg, grid_sell_reason, grid_sell_details)
+                                        speak_async(f"실거래 매도, {get_korean_coin_name(ticker)} {price:,.0f}원, 수익 {net_profit:,.0f}원")
+                                        
+                                        print(f"💰 실거래 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
+                                        
+                                        # 매도 카운트 업데이트
+                                        if ticker in trade_counts:
+                                            trade_counts[ticker]["sell"] += 1
+                                            if net_profit > 0:
+                                                trade_counts[ticker]["profitable_sell"] += 1
+                                        
+                                        update_gui('refresh_chart')  # GUI 즉시 새로고침
+                                        update_gui('action_status', 'looking_buy')
+                                            
+                                    else:
+                                        print(f"❌ 실거래 매도 실패: API 응답 오류")
+                                        print(f"🔍 DEBUG: 매도 실패 상세 - sell_result: {sell_result}")
+                                        log_trade(ticker, "매도 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(sell_result)})
+                                        
+                                except Exception as e:
+                                    print(f"❌ 실거래 매도 오류: {e}")
+                                    print(f"🔍 DEBUG: 매도 예외 상세 - position: {position}")
+                                    import traceback
+                                    print(f"🔍 DEBUG: 매도 예외 스택: {traceback.format_exc()}")
+                                    log_trade(ticker, "매도 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e)})
+                            else:
+                                print(f"⏸️ DEBUG: 실거래 매도 기술분석 방해 - 매도 보류")
                         else:
-                            print(f"❌ 실거래 매도 실패: API 응답 오류")
-                            log_trade(ticker, "매도 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(sell_result)})
-                            
-                    except Exception as e:
-                        print(f"❌ 실거래 매도 오류: {e}")
-                        log_trade(ticker, "매도 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e)})
+                            print(f"⏳ DEBUG: 실거래 매도 하락 미확인 - 현재가({price:,.0f}원) > 확인가({sell_confirmation_price:,.0f}원)")
+                else:
+                    # 매도 보류 상태가 아닐 때 - 지능적 매도 조건 체크
+                    target_price = position.get('target_sell_price', 0)
+                    buy_price = position['actual_buy_price']
+                    
+                    # 변동성 기반 동적 매매 파라미터 계산
+                    volatility_data = advanced_grid_state.calculate_price_volatility(ticker)
+                    trading_params = advanced_grid_state.get_dynamic_trading_params(ticker, volatility_data)
+                    
+                    # 목표가가 현재가 대비 너무 높으면 적응형 조정 (1% 이상 차이시)
+                    if target_price > price * 1.01:  # 목표가가 현재가보다 1% 이상 높으면
+                        adaptive_target = buy_price * (1 + trading_params['target_profit'] / 100)  # 동적 목표 수익으로 조정
+                        print(f"📈 실거래 적응형 목표가 조정: {target_price:,.0f}원 -> {adaptive_target:,.0f}원 (변동성: {volatility_data['trading_intensity']}, 목표수익: {trading_params['target_profit']:.3f}%)")
+                        position['target_sell_price'] = adaptive_target
+                        target_price = adaptive_target
+                    
+                    # 1. 기본 목표가 도달 (기존 로직)
+                    basic_target_met = price >= target_price
+                    
+                    # 2. 트렌드 변화 기반 조기 매도 (변동성 기반 동적 최소 수익 + 하락 전환 감지)
+                    trend_direction = advanced_grid_state.get_trend_direction()
+                    dynamic_min_profit_multiplier = 1 + trading_params['min_profit_for_trend_sell'] / 100
+                    min_profit_met = price > buy_price * dynamic_min_profit_multiplier  # 변동성 기반 최소 수익
+                    trend_sell_condition = min_profit_met and trend_direction == -1
+                    
+                    # 3. 추가 변동성 기반 매도 조건 (고변동성시 수익률 없이도 매도 가능)
+                    volatility_sell_condition = False
+                    if volatility_data['trading_intensity'] == 'high' and price > buy_price * 1.0001:  # 0.01% 이상이면 고변동성시 매도
+                        volatility_sell_condition = True
+                    
+                    if basic_target_met or trend_sell_condition or volatility_sell_condition:
+                        if basic_target_met:
+                            sell_reason_debug = "목표가 도달"
+                        elif volatility_sell_condition:
+                            sell_reason_debug = f"고변동성매도 ({volatility_data['trading_intensity']}, 진폭: {volatility_data['amplitude']:.2f}%)"
+                        else:
+                            sell_reason_debug = f"트렌드하락매도 (트렌드방향: {trend_direction})"
+                        print(f"✅ DEBUG: 실거래 매도 조건 충족! {sell_reason_debug} (변동성기반 매매)")
+                        print(f"📊 매매 파라미터: 최소수익={trading_params['min_profit_for_trend_sell']:.3f}%, 목표수익={trading_params['target_profit']:.3f}%")
+                        try:
+                            sell_result = execute_sell_order(ticker, position['quantity'], price)
+                            if sell_result and sell_result.get('uuid'):
+                                # 매도 성공 처리 (기본 매도)
+                                actual_sell_amount = position['quantity'] * price * (1 - fee_rate)
+                                buy_cost = position['quantity'] * position['actual_buy_price']
+                                net_profit = actual_sell_amount - buy_cost
+                                
+                                demo_positions.remove(position)
+                                save_trading_state(ticker, demo_positions, demo_mode)
+                                
+                                demo_balance += actual_sell_amount
+                                total_realized_profit += net_profit
+                                
+                                # profits.json에 수익 저장
+                                profits_data = load_profits_data()
+                                if ticker not in profits_data:
+                                    profits_data[ticker] = []
+                                
+                                trade_type = "target_sell" if basic_target_met else "trend_sell"
+                                profit_record = {
+                                    "timestamp": datetime.now().isoformat(),
+                                    "trade_type": trade_type,
+                                    "buy_price": position['actual_buy_price'],
+                                    "sell_price": price,
+                                    "amount": position['quantity'],
+                                    "investment_amount": buy_cost,
+                                    "profit_amount": net_profit,
+                                    "profit_rate": (net_profit / buy_cost * 100) if buy_cost > 0 else 0,
+                                    "buy_order_id": position.get('buy_order_id', ''),
+                                    "sell_order_id": sell_result.get('uuid')
+                                }
+                                profits_data[ticker].append(profit_record)
+                                save_profits_data(profits_data)
+                                
+                                sell_reason = f"목표 수익률 달성" if basic_target_met else f"트렌드 하락 감지 조기 매도"
+                                sell_details = {
+                                    "sell_price": f"{price:,.0f}원",
+                                    "quantity": f"{position['quantity']:.8f}개",
+                                    "profit": f"{net_profit:,.0f}원",
+                                    "profit_rate": f"{(net_profit/buy_cost*100):+.2f}%",
+                                    "order_id": sell_result.get('uuid')
+                                }
+                                log_trade(ticker, "실거래 매도", f"{price:,.0f}원 ({position['quantity']:.6f}개) 수익: {net_profit:,.0f}원", sell_reason, sell_details)
+                                speak_async(f"실거래 매도, {get_korean_coin_name(ticker)} {price:,.0f}원, 수익 {net_profit:,.0f}원")
+                                
+                                print(f"💰 실거래 기본 매도 완료: {position['quantity']:.8f}개 @ {price:,.0f}원, 수익: {net_profit:,.0f}원")
+                                
+                                # 매도 카운트 업데이트
+                                if ticker in trade_counts:
+                                    trade_counts[ticker]["sell"] += 1
+                                    if net_profit > 0:
+                                        trade_counts[ticker]["profitable_sell"] += 1
+                                
+                                update_gui('refresh_chart')
+                                
+                            else:
+                                print(f"❌ 실거래 기본 매도 실패: API 응답 오류")
+                                print(f"🔍 DEBUG: 매도 실패 상세 - sell_result: {sell_result}")
+                                log_trade(ticker, "매도 실패", f"주문 실패: {price:,.0f}원", "API 오류", {"error": str(sell_result)})
+                                
+                        except Exception as e:
+                            print(f"❌ 실거래 기본 매도 오류: {e}")
+                            print(f"🔍 DEBUG: 매도 예외 상세 - position: {position}")
+                            import traceback
+                            print(f"🔍 DEBUG: 매도 예외 스택: {traceback.format_exc()}")
+                            log_trade(ticker, "매도 오류", f"주문 오류: {price:,.0f}원", "예외 발생", {"error": str(e)})
+                    else:
+                        profit_rate = ((price - buy_price) / buy_price * 100) if buy_price > 0 else 0
+                        print(f"⏳ DEBUG: 실거래 매도 조건 미충족 - 목표가:{target_price:,.0f}원, 트렌드:{trend_direction}, 수익률:{profit_rate:.2f}%")
 
             # 실거래 모드에서도 GUI 업데이트 수행
             if upbit:
@@ -8247,16 +8825,29 @@ def start_dashboard():
     total_profit_rate_label.grid(row=len(tickers)*6 + 1, column=2, columnspan=2, sticky='w', padx=3, pady=5)
     
     # 지능형 분배 총자산 표시
+    global allocation_label
     allocation_label = ttk.Label(ticker_frame, text="배분된 총자산: 0원", font=('Helvetica', 10, 'bold'), style="Green.TLabel")
     
-    # 초기 총자산 표시 (실현수익 포함)
+    # 초기 총자산 표시 (실거래/데모 모드 구분)
     try:
         print(f"🔍 디버그 - 초기 총자산 계산 시작")
+        is_demo_mode = config.get('demo_mode', True)
+        print(f"🔍 디버그 - 현재 모드: {'데모모드' if is_demo_mode else '실거래모드'}")
         print(f"🔍 디버그 - 현재 config total_investment: {config.get('total_investment', '없음')}")
+        
         initial_total = calculate_total_investment_with_profits()
         print(f"🔍 디버그 - calculate_total_investment_with_profits 결과: {initial_total:,.0f}원")
-        allocation_label.config(text=f"배분된 총자산: {initial_total:,.0f}원 (실현수익 포함)")
-        print(f"💰 초기 총자산 표시: {initial_total:,.0f}원")
+        
+        # 실거래/데모 모드에 따라 다른 텍스트와 스타일 적용
+        if is_demo_mode:
+            label_text = f"배분된 총자산: {initial_total:,.0f}원 (데모모드 - 실현수익 포함)"
+            label_style = "Green.TLabel"
+        else:
+            label_text = f"🔴 실거래 총자산: {initial_total:,.0f}원 (실제 API 잔고 기준)"
+            label_style = "Red.TLabel"
+        
+        allocation_label.config(text=label_text, style=label_style)
+        print(f"💰 초기 총자산 표시: {initial_total:,.0f}원 ({'데모모드' if is_demo_mode else '실거래모드'})")
     except Exception as e:
         print(f"⚠️ 초기 총자산 표시 오류: {e}")
     allocation_label.grid(row=len(tickers)*6 + 2, column=0, columnspan=4, sticky='w', padx=3, pady=5)
@@ -9896,10 +10487,14 @@ def start_dashboard():
                             # 로그 스팸 방지를 위해 매도보류 포인트 추가 로그 제거 (중요한 거래는 별도 로그에 기록됨)
                         elif '매수' in clean_action and '보류' not in clean_action and '취소' not in clean_action:
                             trade_points['buy'].append(point_data)
-                            print(f"📊 {ticker} 매수 포인트 추가: {action} -> {trade_price:,}원")
+                            # 매수는 중요한 거래이므로 로그 유지
+                            if '성공' in action or '완료' in action:
+                                print(f"📊 {ticker} 매수 포인트 추가: {action} -> {trade_price:,}원")
                         elif '매도' in clean_action and '보류' not in clean_action and '취소' not in clean_action:
                             trade_points['sell'].append(point_data)
-                            print(f"📊 {ticker} 매도 포인트 추가: {action} -> {trade_price:,}원")
+                            # 매도도 중요하지만 실패 메시지는 스팸이므로 성공한 거래만 로그
+                            if '성공' in action or '완료' in action:
+                                print(f"📊 {ticker} 매도 포인트 추가: {action} -> {trade_price:,}원")
 
                     except (ValueError, TypeError) as e:
                         continue
@@ -10554,6 +11149,24 @@ def start_dashboard():
     api_init_result = initialize_upbit()
     if api_init_result:
         logger.info("✅ 실거래 모드 사용 가능")
+        
+        # API 초기화 성공 후 실거래 모드에서 총자산 재계산 및 GUI 업데이트
+        if not config.get('demo_mode', True):
+            print("🔍 실거래 모드 - API 초기화 완료 후 총자산 재계산 중...")
+            try:
+                # 실제 API 잔고 기준으로 총자산 재계산
+                updated_total = calculate_real_total_assets()
+                print(f"💰 API 초기화 후 실거래 총자산: {updated_total:,.0f}원")
+                
+                # GUI 업데이트
+                if 'allocation_label' in globals():
+                    updated_text = f"🔴 실거래 총자산: {updated_total:,.0f}원 (실제 API 잔고 기준)"
+                    allocation_label.config(text=updated_text, style="Red.TLabel")
+                    print(f"✅ GUI 총자산 표시 업데이트 완료: {updated_total:,.0f}원")
+                else:
+                    print("⚠️ allocation_label을 찾을 수 없어 GUI 업데이트 스킵")
+            except Exception as update_error:
+                print(f"⚠️ 총자산 재계산 오류: {update_error}")
     else:
         logger.info("⚠️ 데모 모드만 사용 가능")
     

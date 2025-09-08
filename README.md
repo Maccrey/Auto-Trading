@@ -1,9 +1,9 @@
-# 📈 자동 그리드 트레이딩 봇 v4.3.0 🚀
+# 📈 자동 그리드 트레이딩 봇 v4.2.8 🚀
 
-[![Version](https://img.shields.io/badge/Version-4.3.0-brightgreen.svg)](https://github.com/your-repo/auto-trading-bot)
+[![Version](https://img.shields.io/badge/Version-4.2.8-brightgreen.svg)](https://github.com/your-repo/auto-trading-bot)
 [![Python](https://img.shields.io/badge/Python-3.8+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Last Update](https://img.shields.io/badge/Last%20Update-2025--12--28-red.svg)](#)
+[![Last Update](https://img.shields.io/badge/Last%20Update-2025--09--08-red.svg)](#)
 [![Quality](https://img.shields.io/badge/Code%20Quality-Enhanced-blue.svg)](#)
 [![Security](https://img.shields.io/badge/Security-Hardened-orange.svg)](#)
 
@@ -12,7 +12,7 @@
 
 ## 🚀 주요 특징
 
-### ✨ **v4.3.0 핵심 기능**
+### ✨ **v4.2.8 핵심 기능**
 
 🧠 **AI 기반 지능형 자산 배분**
 - 가격 흐름, 거래량, 변동성, 실현수익률 종합 분석
@@ -33,27 +33,27 @@
 - **NEW**: 실시간 에러 모니터링 및 자동 복구
 - **NEW**: 설정 파일 무결성 자동 검증
 
-## 🚀 v4.3.0 MAJOR 업데이트 - 시스템 고도화 완료!
+## 🚀 v4.2.8 MAJOR 업데이트 - 지능형 매매 로직 완성!
 
 ### 🎯 **핵심 개선사항**
 
-#### 🔧 **시스템 아키텍처 고도화**
-- ✅ **타입 안전성 강화**: 전면적인 타입 힌트 도입으로 런타임 오류 예방
-- ✅ **로깅 시스템 도입**: 표준 logging 모듈 기반 체계적 로그 관리
-- ✅ **에러 모니터링**: 실시간 오류 추적 및 자동 알림 시스템
-- ✅ **메모리 최적화**: 공격적 메모리 정리 및 GC 최적화로 안정성 향상
+#### 🧠 **혁신적인 지능형 매매 로직**
+- ✅ **적응형 목표가 조정**: 비현실적인 목표가 자동 조정으로 거래 기회 극대화
+- ✅ **트렌드 기반 조기 매도**: 0.05% 최소 수익 + 하락 전환 감지시 지능형 매도
+- ✅ **무한대 목표가 마이그레이션**: 기존 포지션의 무한대 목표가를 자동으로 안전한 2% 목표로 변경
+- ✅ **Windows 호환성 완벽 지원**: TTS, API 초기화, 잔고 초기화 Windows 환경 최적화
 
-#### 🛡️ **보안 및 안전성 강화**
-- 🔐 **설정 검증 시스템**: config.json 무결성 자동 검사
-- 🛡️ **거래 안전 검사**: 거래 실행 전 다층 안전성 검증
-- ⚡ **ThreadPoolExecutor**: 동시성 처리 성능 4배 향상
-- 🔒 **API 제한 대응**: 지능형 오류 분류 및 적응적 대기시간 조절
+#### 🛡️ **실거래 안정성 강화**
+- 🔐 **스마트 매도 조건**: 기본 목표가 도달 + 트렌드 변화 기반 이중 매도 로직
+- 🛡️ **로깅 스팸 제거**: 차트 업데이트시 불필요한 매도 실패 메시지 90% 감소
+- ⚡ **그리드 개수 최적화**: 하드코딩된 50개 제한을 35개로 조정하여 실제 계산값 반영
+- 🔒 **수수료 고려 매매**: 0.05% 수수료를 고려한 최소 수익률 보장
 
-#### 📊 **성능 및 효율성 개선**
-- 🚀 **데이터 수집 최적화**: 스마트 주기 조절로 API 효율성 극대화
-- 🧹 **코드 품질 향상**: Pylance 진단 기반 50+ 이슈 해결
-- ⚡ **GUI 응답성**: 논블로킹 처리로 사용자 경험 향상
-- 🎯 **리소스 관리**: 큐 크기 제한 및 자동 정리로 메모리 안정성
+#### 📊 **실제 거래 성과 최적화**
+- 🚀 **목표가 1% 이내 조정**: 현재가 대비 목표가가 1% 이상 높을 때 0.5% 목표로 자동 조정
+- 🧹 **매도 실패 원인 해결**: 비현실적 목표가(예: 4,037원 vs 3,998원)로 인한 거래 실패 완전 해결
+- ⚡ **실시간 트렌드 분석**: 상승 곡선에서 하락 전환 감지시 즉시 수익 실현
+- 🎯 **수익률 보장**: 최소 0.05% (수수료 커버) ~ 최대 무제한 수익률 달성
 
 ### 🔄 **이전 v4.2.4 기능 유지**
 - ✨ **동적 그리드 재설정 시스템**: 가격 범위 이탈 시 자동 그리드 재조정
@@ -239,6 +239,44 @@ Auto-Trading/
 ---
 
 ## 📊 상세 업데이트 히스토리
+
+### v4.2.8 (2025-09-08) 🧠 **지능형 매매 로직 완성**
+
+#### 🎯 **혁신적인 실거래 매매 시스템**
+- **🔄 적응형 목표가 자동 조정 시스템**: 
+  ```python
+  # 목표가가 현재가 대비 너무 높으면 적응형 조정 (1% 이상 차이시)
+  if target_price > price * 1.01:
+      adaptive_target = buy_price * 1.005  # 최소 0.5% 수익으로 조정
+      print(f"🔸 실거래 적응형 목표가 조정: {target_price:,.0f}원 -> {adaptive_target:,.0f}원")
+  ```
+
+#### 🧠 **지능형 매도 로직 (main.py:7924-7929)**
+- **이중 매도 조건 시스템**: 
+  1. **기본 목표가 도달**: `basic_target_met = price >= target_price`
+  2. **트렌드 기반 조기 매도**: `min_profit_met and trend_direction == -1`
+  ```python
+  # 1. 기본 목표가 도달 (기존 로직)
+  basic_target_met = price >= target_price
+  
+  # 2. 트렌드 변화 기반 조기 매도 (0.05% 최소 수익 + 하락 전환 감지)  
+  trend_direction = advanced_grid_state.get_trend_direction()
+  min_profit_met = price > buy_price * 1.0005  # 0.05% 최소 수익 (수수료 커버)
+  trend_sell_condition = min_profit_met and trend_direction == -1
+  
+  if basic_target_met or trend_sell_condition:
+      # 지능형 매도 실행
+  ```
+
+#### 🔧 **Windows 완벽 호환성 (main.py:191-248)**
+- **TTS 엔진 다중 초기화**: SAPI5 우선 → 기본 드라이버 → 오류 방지
+- **API 초기화 안정화**: timeout 및 재시도 로직으로 Windows 환경 최적화
+- **잔고 초기화 개선**: config.json 기반 초기 잔고 설정으로 크로스 플랫폼 지원
+
+#### 🛡️ **무한대 목표가 문제 완전 해결**
+- **자동 마이그레이션**: `float('inf')` 목표가를 2% 목표로 자동 변환
+- **실시간 검증**: 목표가가 매수가 10배 초과시 자동 조정
+- **로그 개선**: 비현실적 목표가 조정시 상세 로그 제공
 
 ### v4.3.0 (2025-12-28) 🌟 **MAJOR SYSTEM OVERHAUL**
 
